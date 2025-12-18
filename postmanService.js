@@ -167,25 +167,25 @@ export const initializeTargetWorkspace = async (options = {}) => {
 };
 
 // ============================================================================
-// API SPECIFICATIONS MANAGEMENT
+// SPEC MANAGEMENT (File-based approach)
 // ============================================================================
 
 /**
- * Get all API specs from a workspace
+ * Get all specs from a workspace
  * @param {string} workspaceId - The workspace ID to get specs from
  * @returns {Promise<Array>}
  */
 export const getAllSpecs = async (workspaceId) => {
   try {
     const response = await axios.get(
-      `${POSTMAN_API_BASE}/specs?workspace=${workspaceId}`,
+      `${POSTMAN_API_BASE}/specs?workspaceId=${workspaceId}`,
       {
         headers: {
           "X-Api-Key": POSTMAN_API_KEY || "",
         },
       }
     );
-    return response.data.apis || [];
+    return response.data.specs || [];
   } catch (error) {
     console.error("Error getting specs:", error);
     return [];
@@ -193,14 +193,14 @@ export const getAllSpecs = async (workspaceId) => {
 };
 
 /**
- * Get a single API spec details including schema
- * @param {string} apiId - The API ID
+ * Get spec details
+ * @param {string} specId - The spec ID
  * @returns {Promise<object|null>}
  */
-export const getApiSpec = async (apiId) => {
+export const getSpecDetails = async (specId) => {
   try {
     const response = await axios.get(
-      `${POSTMAN_API_BASE}/specs/${apiId}`,
+      `${POSTMAN_API_BASE}/specs/${specId}`,
       {
         headers: {
           "X-Api-Key": POSTMAN_API_KEY || "",
@@ -209,73 +209,71 @@ export const getApiSpec = async (apiId) => {
     );
     return response.data || null;
   } catch (error) {
-    console.error("Error getting API spec:", error);
+    console.error("Error getting spec details:", error);
     return null;
   }
 };
 
 /**
- * Get all versions of an API
- * @param {string} apiId - The API ID
- * @returns {Promise<Array>}
+ * Get all files in a spec
+ * @param {string} specId - The spec ID
+ * @returns {Promise<Array>} Array of file metadata: { id, name, path, type, createdAt, updatedAt }
  */
-export const getApiVersions = async (apiId) => {
+export const getSpecFiles = async (specId) => {
   try {
     const response = await axios.get(
-      `${POSTMAN_API_BASE}/specs/${apiId}/versions`,
+      `${POSTMAN_API_BASE}/specs/${specId}/files`,
       {
         headers: {
           "X-Api-Key": POSTMAN_API_KEY || "",
         },
       }
     );
-    return response.data.versions || [];
+    return response.data.files || [];
   } catch (error) {
-    console.error("Error getting API versions:", error);
+    console.error("Error getting spec files:", error);
     return [];
   }
 };
 
 /**
- * Get the schema for an API version
- * @param {string} apiId - The API ID
- * @param {string} versionId - The version ID
- * @param {string} schemaId - The schema ID
- * @returns {Promise<object|null>}
+ * Get a specific spec file's content
+ * @param {string} specId - The spec ID
+ * @param {string} filePath - The file path
+ * @returns {Promise<object|null>} { id, name, path, type, content, createdAt, updatedAt }
  */
-export const getApiSchema = async (apiId, versionId, schemaId) => {
+export const getSpecFile = async (specId, filePath) => {
   try {
+    const encodedPath = encodeURIComponent(filePath);
     const response = await axios.get(
-      `${POSTMAN_API_BASE}/specs/${apiId}/versions/${versionId}/schemas/${schemaId}`,
+      `${POSTMAN_API_BASE}/specs/${specId}/files/${encodedPath}`,
       {
         headers: {
           "X-Api-Key": POSTMAN_API_KEY || "",
         },
       }
     );
-    return response.data.schema || null;
+    return response.data || null;
   } catch (error) {
-    console.error("Error getting API schema:", error);
+    console.error(`Error getting spec file ${filePath}:`, error);
     return null;
   }
 };
 
 /**
- * Create a new API in a workspace
+ * Create a new spec in a workspace
  * @param {string} workspaceId - Target workspace ID
- * @param {string} name - API name
- * @param {string} description - API description
- * @returns {Promise<{success: boolean, api?: object, error?: string}>}
+ * @param {string} name - Spec name
+ * @param {string} description - Spec description
+ * @returns {Promise<{success: boolean, spec?: object, error?: string}>}
  */
-export const createApi = async (workspaceId, name, description = '') => {
+export const createSpec = async (workspaceId, name, description = '') => {
   try {
     const response = await axios.post(
-      `${POSTMAN_API_BASE}/specs?workspace=${workspaceId}`,
+      `${POSTMAN_API_BASE}/specs?workspaceId=${workspaceId}`,
       {
-        api: {
-          name,
-          description,
-        },
+        name,
+        description,
       },
       {
         headers: {
@@ -287,7 +285,7 @@ export const createApi = async (workspaceId, name, description = '') => {
 
     return {
       success: true,
-      api: response.data.api || response.data,
+      spec: response.data,
     };
   } catch (error) {
     return {
@@ -302,19 +300,19 @@ export const createApi = async (workspaceId, name, description = '') => {
 };
 
 /**
- * Create an API version
- * @param {string} apiId - The API ID
- * @param {string} name - Version name
- * @returns {Promise<{success: boolean, version?: object, error?: string}>}
+ * Create a file in a spec
+ * @param {string} specId - The spec ID
+ * @param {string} path - The file path (e.g., "index.json" or "components/schemas.json")
+ * @param {string} content - The file content as a string
+ * @returns {Promise<{success: boolean, file?: object, error?: string}>}
  */
-export const createApiVersion = async (apiId, name) => {
+export const createSpecFile = async (specId, path, content) => {
   try {
     const response = await axios.post(
-      `${POSTMAN_API_BASE}/specs/${apiId}/versions`,
+      `${POSTMAN_API_BASE}/specs/${specId}/files`,
       {
-        version: {
-          name,
-        },
+        path,
+        content,
       },
       {
         headers: {
@@ -326,7 +324,7 @@ export const createApiVersion = async (apiId, name) => {
 
     return {
       success: true,
-      version: response.data.version || response.data,
+      file: response.data,
     };
   } catch (error) {
     return {
@@ -341,24 +339,19 @@ export const createApiVersion = async (apiId, name) => {
 };
 
 /**
- * Create a schema for an API version
- * @param {string} apiId - The API ID
- * @param {string} versionId - The version ID
- * @param {string} type - Schema type (e.g., 'openapi3', 'openapi2', 'raml', 'graphql')
- * @param {string} language - Schema language (e.g., 'json', 'yaml')
- * @param {string} schema - The schema content
- * @returns {Promise<{success: boolean, schema?: object, error?: string}>}
+ * Update a spec file's type (e.g., set as ROOT)
+ * @param {string} specId - The spec ID
+ * @param {string} filePath - The file path
+ * @param {string} type - The file type ('ROOT' or 'DEFAULT')
+ * @returns {Promise<{success: boolean, file?: object, error?: string}>}
  */
-export const createApiSchema = async (apiId, versionId, type, language, schema) => {
+export const updateSpecFileType = async (specId, filePath, type) => {
   try {
-    const response = await axios.post(
-      `${POSTMAN_API_BASE}/specs/${apiId}/versions/${versionId}/schemas`,
+    const encodedPath = encodeURIComponent(filePath);
+    const response = await axios.patch(
+      `${POSTMAN_API_BASE}/specs/${specId}/files/${encodedPath}`,
       {
-        schema: {
-          type,
-          language,
-          schema,
-        },
+        type,
       },
       {
         headers: {
@@ -370,7 +363,7 @@ export const createApiSchema = async (apiId, versionId, type, language, schema) 
 
     return {
       success: true,
-      schema: response.data.schema || response.data,
+      file: response.data,
     };
   } catch (error) {
     return {
@@ -385,26 +378,135 @@ export const createApiSchema = async (apiId, versionId, type, language, schema) 
 };
 
 /**
- * Delete an API
- * @param {string} apiId - The API ID to delete
+ * Delete a spec
+ * @param {string} specId - The spec ID to delete
  * @returns {Promise<boolean>}
  */
-export const deleteApi = async (apiId) => {
+export const deleteSpec = async (specId) => {
   try {
-    await axios.delete(`${POSTMAN_API_BASE}/specs/${apiId}`, {
+    await axios.delete(`${POSTMAN_API_BASE}/specs/${specId}`, {
       headers: {
         "X-Api-Key": POSTMAN_API_KEY || "",
       },
     });
     return true;
   } catch (error) {
-    console.error("Error deleting API:", error);
+    console.error("Error deleting spec:", error);
     return false;
   }
 };
 
 /**
- * Copy specs from source workspace to target workspace
+ * Copy a spec with all its files from source to target workspace
+ * @param {string} sourceSpecId - Source spec ID
+ * @param {string} sourceSpecName - Source spec name
+ * @param {string} targetWorkspaceId - Target workspace ID
+ * @param {function} onProgress - Progress callback
+ * @returns {Promise<object>} Result with success, newSpecId, filesCopied, errors
+ */
+export const copySpec = async (sourceSpecId, sourceSpecName, targetWorkspaceId, onProgress) => {
+  const result = {
+    success: false,
+    specName: sourceSpecName,
+    newSpecId: null,
+    filesCopied: 0,
+    totalFiles: 0,
+    errors: [],
+  };
+
+  try {
+    // Step 1: Get spec details
+    onProgress?.({ step: 'details', message: `Getting spec details for: ${sourceSpecName}` });
+    const specDetails = await getSpecDetails(sourceSpecId);
+    const description = specDetails?.description || '';
+
+    // Step 2: Get all files in the source spec
+    onProgress?.({ step: 'files', message: `Getting files for: ${sourceSpecName}` });
+    const sourceFiles = await getSpecFiles(sourceSpecId);
+    result.totalFiles = sourceFiles.length;
+
+    if (sourceFiles.length === 0) {
+      result.errors.push('No files found in source spec');
+      return result;
+    }
+
+    // Step 3: Get content for each file
+    onProgress?.({ step: 'content', message: `Fetching ${sourceFiles.length} file(s) content...` });
+    const filesWithContent = [];
+    
+    for (const file of sourceFiles) {
+      const fileContent = await getSpecFile(sourceSpecId, file.path);
+      if (fileContent && fileContent.content) {
+        filesWithContent.push({
+          path: file.path,
+          content: fileContent.content,
+          type: file.type,
+          name: file.name,
+        });
+      } else {
+        result.errors.push(`Failed to get content for file: ${file.path}`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    if (filesWithContent.length === 0) {
+      result.errors.push('Could not retrieve any file contents');
+      return result;
+    }
+
+    // Step 4: Create new spec in target workspace
+    onProgress?.({ step: 'create', message: `Creating spec in target workspace...` });
+    const createResult = await createSpec(targetWorkspaceId, sourceSpecName, description);
+    
+    if (!createResult.success) {
+      result.errors.push(`Failed to create spec: ${createResult.error}`);
+      return result;
+    }
+
+    result.newSpecId = createResult.spec.id;
+
+    // Step 5: Create files in the new spec (ROOT file first)
+    const rootFile = filesWithContent.find(f => f.type === 'ROOT');
+    const otherFiles = filesWithContent.filter(f => f.type !== 'ROOT');
+    const orderedFiles = rootFile ? [rootFile, ...otherFiles] : filesWithContent;
+
+    onProgress?.({ step: 'copyFiles', message: `Copying ${orderedFiles.length} file(s)...` });
+
+    for (let i = 0; i < orderedFiles.length; i++) {
+      const file = orderedFiles[i];
+      onProgress?.({ 
+        step: 'copyFile', 
+        message: `Copying file: ${file.path}`,
+        current: i + 1,
+        total: orderedFiles.length,
+      });
+
+      const fileResult = await createSpecFile(result.newSpecId, file.path, file.content);
+      
+      if (fileResult.success) {
+        result.filesCopied++;
+        
+        if (file.type === 'ROOT' && i > 0) {
+          await updateSpecFileType(result.newSpecId, file.path, 'ROOT');
+        }
+      } else {
+        result.errors.push(`Failed to create file ${file.path}: ${fileResult.error}`);
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
+    result.success = result.filesCopied > 0;
+    return result;
+
+  } catch (error) {
+    result.errors.push(`Unexpected error: ${error.message}`);
+    return result;
+  }
+};
+
+/**
+ * Copy all specs from source workspace to target workspace
  * @param {string} sourceWorkspaceId - Source workspace ID
  * @param {string} targetWorkspaceId - Target workspace ID
  * @param {function} onProgress - Progress callback
@@ -416,91 +518,47 @@ export const copySpecs = async (sourceWorkspaceId, targetWorkspaceId, onProgress
     errors: [],
   };
 
-  // Get all APIs from source workspace
-  const sourceApis = await getAllSpecs(sourceWorkspaceId);
+  const sourceSpecs = await getAllSpecs(sourceWorkspaceId);
 
-  if (sourceApis.length === 0) {
+  if (sourceSpecs.length === 0) {
     onProgress?.({
       phase: 'specs',
-      message: 'No API specs found in source workspace',
+      message: 'No specs found in source workspace',
       progress: 100,
     });
     return results;
   }
 
-  for (let i = 0; i < sourceApis.length; i++) {
-    const api = sourceApis[i];
-    const progressPercent = Math.round((i / sourceApis.length) * 100);
+  for (let i = 0; i < sourceSpecs.length; i++) {
+    const spec = sourceSpecs[i];
+    const progressPercent = Math.round((i / sourceSpecs.length) * 100);
 
     onProgress?.({
       phase: 'specs',
-      message: `Copying API spec: ${api.name}`,
-      currentItem: api.name,
+      message: `Copying spec: ${spec.name}`,
+      currentItem: spec.name,
       current: i + 1,
-      total: sourceApis.length,
+      total: sourceSpecs.length,
       progress: progressPercent,
     });
 
-    try {
-      // Get full API details
-      const apiDetails = await getApiSpec(api.id);
-      
-      // Create the API in target workspace
-      const createResult = await createApi(
-        targetWorkspaceId,
-        api.name,
-        apiDetails?.api?.description || ''
-      );
+    const copyResult = await copySpec(spec.id, spec.name, targetWorkspaceId);
 
-      if (!createResult.success) {
-        results.errors.push({
-          apiName: api.name,
-          error: createResult.error,
-        });
-        continue;
-      }
-
-      const newApiId = createResult.api.id;
-
-      // Get versions and copy schemas
-      const versions = await getApiVersions(api.id);
-      
-      for (const version of versions) {
-        // Create version in new API
-        const versionResult = await createApiVersion(newApiId, version.name);
-        
-        if (versionResult.success && version.schema && version.schema.length > 0) {
-          for (const schemaRef of version.schema) {
-            // Get the schema content
-            const schemaDetails = await getApiSchema(api.id, version.id, schemaRef);
-            
-            if (schemaDetails) {
-              await createApiSchema(
-                newApiId,
-                versionResult.version.id,
-                schemaDetails.type || 'openapi3',
-                schemaDetails.language || 'json',
-                schemaDetails.schema
-              );
-            }
-          }
-        }
-      }
-
+    if (copyResult.success) {
       results.copied.push({
-        originalApiId: api.id,
-        newApiId,
-        name: api.name,
+        originalSpecId: spec.id,
+        newSpecId: copyResult.newSpecId,
+        name: spec.name,
+        filesCopied: copyResult.filesCopied,
       });
-
-      // Delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 500));
-    } catch (error) {
+    } else {
       results.errors.push({
-        apiName: api.name,
-        error: error.message,
+        specName: spec.name,
+        error: copyResult.errors.join('; '),
       });
     }
+
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
 
   return results;
@@ -903,17 +961,17 @@ export const resetWorkspace = async (workspaceId, onProgress, options = {}) => {
     }
   }
 
-  // Delete all APIs
+  // Delete all specs
   if (includeApis) {
-    const apis = await getAllSpecs(workspaceId);
-    for (const api of apis) {
-      const success = await deleteApi(api.id);
+    const specs = await getAllSpecs(workspaceId);
+    for (const spec of specs) {
+      const success = await deleteSpec(spec.id);
       if (success) result.deletedApis++;
       if (onProgress) {
         onProgress({
-          phase: 'apis',
+          phase: 'specs',
           deleted: result.deletedApis,
-          total: apis.length,
+          total: specs.length,
         });
       }
       await new Promise((resolve) => setTimeout(resolve, 200));

@@ -304,6 +304,84 @@ Module with exported functions for importing into other projects (e.g., React/Vi
 
 ---
 
+## Modular Architecture
+
+The provisioning script is built with a modular architecture that separates concerns into **API modules** and **Helper modules**.
+
+### Workflow Steps
+
+The provisioning follows this exact order:
+
+1. **Copy Collections** - Fork all collections from source to target workspace
+2. **Create Mock Servers** - Create a mock server for each copied collection
+3. **Copy Environments** - Copy all environment templates from source workspace
+4. **Update Mock Env** - Update or create "Mock Env" with new mock server URLs
+5. **Copy Specs** - Copy all API specifications with their files
+
+### Module Structure
+
+#### In-Memory Store
+```javascript
+Store = {
+  collections: Map(),    // sourceUid -> { targetUid, name }
+  environments: Map(),   // sourceUid -> { targetUid, name }
+  mocks: Map(),         // collectionUid -> { mockId, mockUrl, name }
+  specs: Map(),         // sourceId -> { targetId, name, filesCopied }
+}
+```
+
+#### API Modules (Postman API Calls)
+These modules wrap Postman API endpoints:
+
+| Module | Functions | Endpoints |
+|--------|-----------|-----------|
+| `WorkspaceAPI` | `validateApiKey()`, `getWorkspace()`, `createWorkspace()` | `/me`, `/workspaces` |
+| `CollectionsAPI` | `getAll()`, `getDetails()`, `fork()` | `/collections`, `/collections/fork` |
+| `MocksAPI` | `getAll()`, `create()`, `getDetails()` | `/mocks` |
+| `EnvironmentsAPI` | `getAll()`, `getDetails()`, `create()`, `update()`, `patch()` | `/environments` |
+| `SpecsAPI` | `getAll()`, `getDetails()`, `getFiles()`, `getFile()`, `create()`, `createFile()`, `updateFileType()` | `/specs`, `/specs/{id}/files` |
+
+#### Helper Modules (Business Logic)
+These modules manage complex operations:
+
+| Module | Functions | Purpose |
+|--------|-----------|---------|
+| `CollectionsHelper` | `copyAll()`, `getTargetUidByName()` | Bulk copy collections, store mappings |
+| `MocksHelper` | `createForAllCollections()`, `generateMockUrlVariables()` | Create mocks, generate env variables |
+| `EnvironmentsHelper` | `copyAll()`, `findMockEnv()`, `updateOrCreateMockEnv()` | Copy envs, manage Mock Env |
+| `SpecsHelper` | `copySpec()`, `copyAll()` | Copy specs with all files |
+
+### Exported Modules
+
+For programmatic use, you can import individual modules:
+
+```javascript
+import {
+  WorkspaceAPI,
+  CollectionsAPI,
+  CollectionsHelper,
+  MocksAPI,
+  MocksHelper,
+  EnvironmentsAPI,
+  EnvironmentsHelper,
+  SpecsAPI,
+  SpecsHelper,
+  Store,
+  runProvisioningWorkflow,
+} from './provision.js';
+
+// Use individual API calls
+const collections = await CollectionsAPI.getAll(workspaceId);
+
+// Use helper functions
+const results = await CollectionsHelper.copyAll(sourceId, targetId);
+
+// Access the in-memory store
+console.log(Store.getAllMockUrls());
+```
+
+---
+
 ## Troubleshooting
 
 ### "POSTMAN_API_KEY is required"

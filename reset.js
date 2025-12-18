@@ -73,6 +73,58 @@ const api = axios.create({
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Extract detailed error information from axios errors
+ */
+function getErrorDetails(error) {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    const statusText = error.response?.statusText;
+    const errorMessage = error.response?.data?.error?.message 
+      || error.response?.data?.message 
+      || error.message;
+    const errorName = error.response?.data?.error?.name;
+    const errorDetails = error.response?.data?.error?.details;
+    
+    let fullMessage = '';
+    if (status) fullMessage += `[${status}${statusText ? ' ' + statusText : ''}] `;
+    if (errorName) fullMessage += `${errorName}: `;
+    fullMessage += errorMessage;
+    if (errorDetails) fullMessage += ` - ${JSON.stringify(errorDetails)}`;
+    
+    return {
+      status,
+      message: fullMessage,
+      raw: error.response?.data
+    };
+  }
+  return {
+    status: null,
+    message: error.message || 'Unknown error',
+    raw: null
+  };
+}
+
+/**
+ * Log detailed API error
+ */
+function logApiError(operation, error, context = {}) {
+  const details = getErrorDetails(error);
+  log.error(`${operation}: ${details.message}`);
+  
+  if (context.endpoint) {
+    log.detail(`Endpoint: ${context.endpoint}`);
+  }
+  if (context.id) {
+    log.detail(`Resource ID: ${context.id}`);
+  }
+  if (details.raw && process.env.DEBUG) {
+    log.detail(`Raw response: ${JSON.stringify(details.raw, null, 2)}`);
+  }
+  
+  return details.message;
+}
+
 // ============================================================================
 // WORKSPACE FUNCTIONS
 // ============================================================================
@@ -94,6 +146,10 @@ async function getWorkspace(workspaceId) {
     const response = await api.get(`/workspaces/${workspaceId}`);
     return response.data.workspace;
   } catch (error) {
+    logApiError('Failed to get workspace', error, { 
+      endpoint: `/workspaces/${workspaceId}`,
+      id: workspaceId 
+    });
     return null;
   }
 }
@@ -107,6 +163,10 @@ async function getAllCollections(workspaceId) {
     const response = await api.get(`/collections?workspace=${workspaceId}`);
     return response.data.collections || [];
   } catch (error) {
+    logApiError('Failed to get collections', error, { 
+      endpoint: `/collections?workspace=${workspaceId}`,
+      id: workspaceId 
+    });
     return [];
   }
 }
@@ -114,9 +174,13 @@ async function getAllCollections(workspaceId) {
 async function deleteCollection(collectionUid) {
   try {
     await api.delete(`/collections/${collectionUid}`);
-    return true;
+    return { success: true };
   } catch (error) {
-    return false;
+    const errorMsg = logApiError('Failed to delete collection', error, { 
+      endpoint: `/collections/${collectionUid}`,
+      id: collectionUid 
+    });
+    return { success: false, error: errorMsg };
   }
 }
 
@@ -125,6 +189,10 @@ async function getAllEnvironments(workspaceId) {
     const response = await api.get(`/environments?workspace=${workspaceId}`);
     return response.data.environments || [];
   } catch (error) {
+    logApiError('Failed to get environments', error, { 
+      endpoint: `/environments?workspace=${workspaceId}`,
+      id: workspaceId 
+    });
     return [];
   }
 }
@@ -132,9 +200,13 @@ async function getAllEnvironments(workspaceId) {
 async function deleteEnvironment(environmentUid) {
   try {
     await api.delete(`/environments/${environmentUid}`);
-    return true;
+    return { success: true };
   } catch (error) {
-    return false;
+    const errorMsg = logApiError('Failed to delete environment', error, { 
+      endpoint: `/environments/${environmentUid}`,
+      id: environmentUid 
+    });
+    return { success: false, error: errorMsg };
   }
 }
 
@@ -143,6 +215,10 @@ async function getAllMocks(workspaceId) {
     const response = await api.get(`/mocks?workspace=${workspaceId}`);
     return response.data.mocks || [];
   } catch (error) {
+    logApiError('Failed to get mocks', error, { 
+      endpoint: `/mocks?workspace=${workspaceId}`,
+      id: workspaceId 
+    });
     return [];
   }
 }
@@ -150,17 +226,25 @@ async function getAllMocks(workspaceId) {
 async function deleteMock(mockUid) {
   try {
     await api.delete(`/mocks/${mockUid}`);
-    return true;
+    return { success: true };
   } catch (error) {
-    return false;
+    const errorMsg = logApiError('Failed to delete mock', error, { 
+      endpoint: `/mocks/${mockUid}`,
+      id: mockUid 
+    });
+    return { success: false, error: errorMsg };
   }
 }
 
 async function getAllSpecs(workspaceId) {
   try {
-    const response = await api.get(`/specs?workspace=${workspaceId}`);
-    return response.data.apis || [];
+    const response = await api.get(`/specs?workspaceId=${workspaceId}`);
+    return response.data.specs || [];
   } catch (error) {
+    logApiError('Failed to get specs', error, { 
+      endpoint: `/specs?workspaceId=${workspaceId}`,
+      id: workspaceId 
+    });
     return [];
   }
 }
@@ -168,9 +252,13 @@ async function getAllSpecs(workspaceId) {
 async function deleteSpec(specId) {
   try {
     await api.delete(`/specs/${specId}`);
-    return true;
+    return { success: true };
   } catch (error) {
-    return false;
+    const errorMsg = logApiError('Failed to delete spec', error, { 
+      endpoint: `/specs/${specId}`,
+      id: specId 
+    });
+    return { success: false, error: errorMsg };
   }
 }
 
@@ -190,7 +278,7 @@ async function confirmReset(workspaceName, counts) {
   console.log(`  • ${counts.collections} collection(s)`);
   console.log(`  • ${counts.environments} environment(s)`);
   console.log(`  • ${counts.mocks} mock server(s)`);
-  console.log(`  • ${counts.specs} API spec(s)`);
+  console.log(`  • ${counts.specs} spec(s)`);
   console.log('');
 
   return new Promise((resolve) => {
@@ -273,7 +361,7 @@ async function reset() {
   log.detail(`Collections: ${collections.length}`);
   log.detail(`Environments: ${environments.length}`);
   log.detail(`Mock Servers: ${mocks.length}`);
-  log.detail(`API Specs: ${specs.length}`);
+  log.detail(`Specs: ${specs.length}`);
 
   // Confirmation
   if (!SKIP_CONFIRM) {
@@ -291,76 +379,78 @@ async function reset() {
   }
 
   // =========================================================================
-  // DELETE MOCK SERVERS FIRST (they depend on collections)
+  // DELETION ORDER: Reverse of provisioning (Specs → Mocks → Environments → Collections)
+  // Provisioning creates: Collections → Environments → Mocks → Specs
+  // Reset deletes in reverse to handle dependencies properly
+  // =========================================================================
+
+  // =========================================================================
+  // 1. DELETE SPECS FIRST
+  // =========================================================================
+  if (specs.length > 0) {
+    log.step('Deleting specs...');
+    
+    for (const spec of specs) {
+      const result = await deleteSpec(spec.id);
+      if (result.success) {
+        results.specs.deleted++;
+        log.success(`Deleted spec: ${spec.name}`);
+      } else {
+        results.specs.failed.push({ name: spec.name, error: result.error });
+      }
+      await delay(200);
+    }
+  }
+
+  // =========================================================================
+  // 2. DELETE MOCK SERVERS (depend on collections, must delete before collections)
   // =========================================================================
   if (mocks.length > 0) {
     log.step('Deleting mock servers...');
     
     for (const mock of mocks) {
-      const success = await deleteMock(mock.uid);
-      if (success) {
+      const result = await deleteMock(mock.uid);
+      if (result.success) {
         results.mocks.deleted++;
         log.success(`Deleted mock: ${mock.name}`);
       } else {
-        results.mocks.failed.push(mock.name);
-        log.error(`Failed to delete mock: ${mock.name}`);
+        results.mocks.failed.push({ name: mock.name, error: result.error });
       }
       await delay(200);
     }
   }
 
   // =========================================================================
-  // DELETE COLLECTIONS
-  // =========================================================================
-  if (collections.length > 0) {
-    log.step('Deleting collections...');
-    
-    for (const collection of collections) {
-      const success = await deleteCollection(collection.uid);
-      if (success) {
-        results.collections.deleted++;
-        log.success(`Deleted collection: ${collection.name}`);
-      } else {
-        results.collections.failed.push(collection.name);
-        log.error(`Failed to delete collection: ${collection.name}`);
-      }
-      await delay(200);
-    }
-  }
-
-  // =========================================================================
-  // DELETE ENVIRONMENTS
+  // 3. DELETE ENVIRONMENTS
   // =========================================================================
   if (environments.length > 0) {
     log.step('Deleting environments...');
     
     for (const env of environments) {
-      const success = await deleteEnvironment(env.uid);
-      if (success) {
+      const result = await deleteEnvironment(env.uid);
+      if (result.success) {
         results.environments.deleted++;
         log.success(`Deleted environment: ${env.name}`);
       } else {
-        results.environments.failed.push(env.name);
-        log.error(`Failed to delete environment: ${env.name}`);
+        results.environments.failed.push({ name: env.name, error: result.error });
       }
       await delay(200);
     }
   }
 
   // =========================================================================
-  // DELETE API SPECS
+  // 4. DELETE COLLECTIONS LAST
   // =========================================================================
-  if (specs.length > 0) {
-    log.step('Deleting API specs...');
+  if (collections.length > 0) {
+    log.step('Deleting collections...');
     
-    for (const spec of specs) {
-      const success = await deleteSpec(spec.id);
-      if (success) {
-        results.specs.deleted++;
-        log.success(`Deleted API spec: ${spec.name}`);
+    for (const collection of collections) {
+      const result = await deleteCollection(collection.uid);
+      if (result.success) {
+        results.collections.deleted++;
+        log.success(`Deleted collection: ${collection.name}`);
       } else {
-        results.specs.failed.push(spec.name);
-        log.error(`Failed to delete API spec: ${spec.name}`);
+        results.collections.failed.push({ name: collection.name, error: result.error });
       }
       await delay(200);
     }
@@ -379,7 +469,7 @@ async function reset() {
   console.log(`\x1b[1mCollections:\x1b[0m ${results.collections.deleted}/${results.collections.total} deleted`);
   console.log(`\x1b[1mEnvironments:\x1b[0m ${results.environments.deleted}/${results.environments.total} deleted`);
   console.log(`\x1b[1mMock Servers:\x1b[0m ${results.mocks.deleted}/${results.mocks.total} deleted`);
-  console.log(`\x1b[1mAPI Specs:\x1b[0m ${results.specs.deleted}/${results.specs.total} deleted`);
+  console.log(`\x1b[1mSpecs:\x1b[0m ${results.specs.deleted}/${results.specs.total} deleted`);
 
   const totalFailed = 
     results.collections.failed.length + 
@@ -391,16 +481,28 @@ async function reset() {
     console.log('\n\x1b[33m⚠ Some items failed to delete:\x1b[0m');
     
     if (results.collections.failed.length > 0) {
-      console.log('  Collections:', results.collections.failed.join(', '));
+      console.log('  \x1b[1mCollections:\x1b[0m');
+      results.collections.failed.forEach(f => {
+        console.log(`    • ${f.name}`);
+      });
     }
     if (results.environments.failed.length > 0) {
-      console.log('  Environments:', results.environments.failed.join(', '));
+      console.log('  \x1b[1mEnvironments:\x1b[0m');
+      results.environments.failed.forEach(f => {
+        console.log(`    • ${f.name}`);
+      });
     }
     if (results.mocks.failed.length > 0) {
-      console.log('  Mocks:', results.mocks.failed.join(', '));
+      console.log('  \x1b[1mMocks:\x1b[0m');
+      results.mocks.failed.forEach(f => {
+        console.log(`    • ${f.name}`);
+      });
     }
     if (results.specs.failed.length > 0) {
-      console.log('  Specs:', results.specs.failed.join(', '));
+      console.log('  \x1b[1mSpecs:\x1b[0m');
+      results.specs.failed.forEach(f => {
+        console.log(`    • ${f.name}`);
+      });
     }
   }
 
