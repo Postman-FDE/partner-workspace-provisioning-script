@@ -1,0 +1,25 @@
+{
+  "name": "postman-workspace-provisioning",
+  "version": "1.0.0",
+  "description": "Automated Postman partner workspace provisioning and reset scripts",
+  "type": "module",
+  "scripts": {
+    "provision": "node provision.js",
+    "reset": "node reset.js",
+    "provision:help": "echo 'Usage: npm run provision -- --name \"Workspace Name\"'",
+    "reset:help": "echo 'Usage: npm run reset -- --workspace-id \"workspace-id\" --confirm'"
+  },
+  "keywords": [
+    "postman",
+    "workspace",
+    "automation",
+    "provisioning"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1"
+  }
+}
+
