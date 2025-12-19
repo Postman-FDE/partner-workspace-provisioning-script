@@ -837,9 +837,11 @@ export const getAllMocks = async (workspaceId) => {
 };
 
 // Delete a mock server
-export const deleteMock = async (mockUid) => {
+// DELETE /mocks/{mockId}
+// Note: Use mock.id (not mock.uid) for deletion
+export const deleteMock = async (mockId) => {
   try {
-    await axios.delete(`${POSTMAN_API_BASE}/mocks/${mockUid}`, {
+    await axios.delete(`${POSTMAN_API_BASE}/mocks/${mockId}`, {
       headers: {
         "X-Api-Key": POSTMAN_API_KEY || "",
       },
@@ -948,7 +950,8 @@ export const resetWorkspace = async (workspaceId, onProgress, options = {}) => {
   if (includeMocks) {
     const mocks = await getAllMocks(workspaceId);
     for (const mock of mocks) {
-      const success = await deleteMock(mock.uid);
+      // Use mock.id (not mock.uid) for deletion
+      const success = await deleteMock(mock.id);
       if (success) result.deletedMocks++;
       if (onProgress) {
         onProgress({

@@ -30,12 +30,24 @@ POSTMAN_API_KEY=PMAK-xxxxxxxx-xxxxxxxxxxxxxxxxxxxx
 # REQUIRED: Source workspace ID (workspace to copy FROM)
 POSTMAN_SOURCE_WORKSPACE_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
-# OPTIONAL: Target workspace ID (if omitted, creates a new partner workspace)
+# OPTIONAL: Target workspace ID
+# - If provided: Script copies content to this existing workspace
+# - If omitted: Script creates a new partner workspace
 POSTMAN_TARGET_WORKSPACE_ID=
 
-# OPTIONAL: Name for the new workspace (default: "Partner Workspace")
+# OPTIONAL: Name for new workspace (only used when no target ID is provided)
+# Default: "Partner Workspace"
 POSTMAN_WORKSPACE_NAME=My Partner Workspace
 ```
+
+**How the scripts use these variables:**
+
+| Variable | Provision Script | Reset Script |
+|----------|------------------|--------------|
+| `POSTMAN_API_KEY` | Required for API authentication | Required for API authentication |
+| `POSTMAN_SOURCE_WORKSPACE_ID` | Copy content FROM this workspace | Not used |
+| `POSTMAN_TARGET_WORKSPACE_ID` | Copy content TO this workspace (or create new if empty) | Reset this workspace |
+| `POSTMAN_WORKSPACE_NAME` | Name for new workspace (if creating) | Not used |
 
 ### 3. Run Provisioning
 
@@ -182,25 +194,49 @@ API Specs: 3/3 copied
 Removes all content from a workspace, returning it to a blank state.
 
 ```bash
-# Using npm
+# Interactive mode (uses POSTMAN_TARGET_WORKSPACE_ID from .env if set)
 npm run reset
 
 # Using node directly
 node reset.js
 
-# With options
+# With specific workspace ID (overrides .env)
 node reset.js --workspace-id "workspace-to-reset"
-node reset.js --workspace-id "workspace-id" --confirm  # Skip prompt
-node reset.js -w "workspace-id" -y
+
+# Skip confirmation prompt
+node reset.js --confirm
+node reset.js -y
+
+# Full non-interactive reset
+node reset.js --workspace-id "workspace-id" --confirm
 ```
 
-**What it deletes:**
-- 🗑️ All collections
-- 🗑️ All environments
-- 🗑️ All mock servers
-- 🗑️ All API specs
+**Deletion Order (reverse of provisioning):**
+1. 🗑️ Specs (deleted first)
+2. 🗑️ Mock servers (depend on collections)
+3. 🗑️ Environments
+4. 🗑️ Collections (deleted last)
 
 > ⚠️ **Warning:** This action cannot be undone!
+
+**Interactive Mode:**
+
+If `POSTMAN_TARGET_WORKSPACE_ID` is not set in `.env`, the script will prompt you to enter a workspace ID:
+
+```
+╔═══════════════════════════════════════════════════════════════╗
+║              POSTMAN WORKSPACE RESET SCRIPT                   ║
+╚═══════════════════════════════════════════════════════════════╝
+
+─────────────────────────────────────────────────────────────
+Configuration
+
+Current settings:
+  API Key:          ✓ Configured
+  Target Workspace: (not set)
+
+Enter workspace ID to reset: _
+```
 
 ---
 
@@ -353,8 +389,9 @@ These modules manage complex operations:
 
 ### Exported Modules
 
-For programmatic use, you can import individual modules:
+Both scripts export their modules for programmatic use:
 
+**Provision Script:**
 ```javascript
 import {
   WorkspaceAPI,
@@ -378,6 +415,53 @@ const results = await CollectionsHelper.copyAll(sourceId, targetId);
 
 // Access the in-memory store
 console.log(Store.getAllMockUrls());
+```
+
+**Reset Script:**
+```javascript
+import {
+  WorkspaceAPI,
+  CollectionsAPI,
+  CollectionsHelper,
+  MocksAPI,
+  MocksHelper,
+  EnvironmentsAPI,
+  EnvironmentsHelper,
+  SpecsAPI,
+  SpecsHelper,
+  Store,
+  runResetWorkflow,
+} from './reset.js';
+
+// Scan workspace
+await CollectionsHelper.scanAll(workspaceId);
+
+// Delete all scanned items
+const results = await CollectionsHelper.deleteAll();
+
+// Access scanned items in store
+console.log(Store.collections);
+```
+
+### Reset Script Module Structure
+
+The reset script follows the same modular pattern:
+
+| Module | Functions | Purpose |
+|--------|-----------|---------|
+| `CollectionsHelper` | `scanAll()`, `deleteAll()` | Scan and bulk delete collections |
+| `MocksHelper` | `scanAll()`, `deleteAll()` | Scan and bulk delete mocks |
+| `EnvironmentsHelper` | `scanAll()`, `deleteAll()` | Scan and bulk delete environments |
+| `SpecsHelper` | `scanAll()`, `deleteAll()` | Scan and bulk delete specs |
+
+**In-Memory Store (Reset):**
+```javascript
+Store = {
+  collections: [],    // Array of collections found
+  environments: [],   // Array of environments found
+  mocks: [],         // Array of mocks found
+  specs: [],         // Array of specs found
+}
 ```
 
 ---

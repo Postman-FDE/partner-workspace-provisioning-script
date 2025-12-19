@@ -367,6 +367,10 @@ const MocksAPI = {
   /**
    * Get all mock servers in a workspace
    * GET /mocks?workspace={workspaceId}
+   * 
+   * Response contains: id, uid, name, collection, mockUrl, etc.
+   * - id: The mock server's ID (use this for DELETE/UPDATE operations)
+   * - uid: The mock server's unique ID (includes owner prefix)
    */
   async getAll(workspaceId) {
     try {
