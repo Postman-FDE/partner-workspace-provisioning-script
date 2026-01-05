@@ -261,20 +261,24 @@ export const getSpecFile = async (specId, filePath) => {
 };
 
 /**
- * Create a new spec in a workspace
+ * Create a new spec in a workspace with files
  * @param {string} workspaceId - Target workspace ID
  * @param {string} name - Spec name
- * @param {string} description - Spec description
+ * @param {string} type - Spec type (e.g., "OPENAPI:3.0", "OPENAPI:3.1", "ASYNCAPI:2.0")
+ * @param {Array} files - Array of files with { path, content, type } where type is "ROOT" or "DEFAULT"
  * @returns {Promise<{success: boolean, spec?: object, error?: string}>}
  */
-export const createSpec = async (workspaceId, name, description = '') => {
+export const createSpec = async (workspaceId, name, type, files) => {
   try {
+    const requestBody = {
+      name,
+      type,
+      files,
+    };
+    
     const response = await axios.post(
       `${POSTMAN_API_BASE}/specs?workspaceId=${workspaceId}`,
-      {
-        name,
-        description,
-      },
+      requestBody,
       {
         headers: {
           "Content-Type": "application/json",
@@ -404,7 +408,7 @@ export const deleteSpec = async (specId) => {
  * @param {function} onProgress - Progress callback
  * @returns {Promise<object>} Result with success, newSpecId, filesCopied, errors
  */
-export const copySpec = async (sourceSpecId, sourceSpecName, targetWorkspaceId, onProgress) => {
+export const copySpec = async (sourceSpecId, sourceSpecName, sourceSpecType, targetWorkspaceId, onProgress) => {
   const result = {
     success: false,
     specName: sourceSpecName,
@@ -415,12 +419,7 @@ export const copySpec = async (sourceSpecId, sourceSpecName, targetWorkspaceId, 
   };
 
   try {
-    // Step 1: Get spec details
-    onProgress?.({ step: 'details', message: `Getting spec details for: ${sourceSpecName}` });
-    const specDetails = await getSpecDetails(sourceSpecId);
-    const description = specDetails?.description || '';
-
-    // Step 2: Get all files in the source spec
+    // Step 1: Get all files metadata for the source spec
     onProgress?.({ step: 'files', message: `Getting files for: ${sourceSpecName}` });
     const sourceFiles = await getSpecFiles(sourceSpecId);
     result.totalFiles = sourceFiles.length;
@@ -430,18 +429,24 @@ export const copySpec = async (sourceSpecId, sourceSpecName, targetWorkspaceId, 
       return result;
     }
 
-    // Step 3: Get content for each file
+    // Step 2: Get content for each file
     onProgress?.({ step: 'content', message: `Fetching ${sourceFiles.length} file(s) content...` });
     const filesWithContent = [];
     
     for (const file of sourceFiles) {
+      onProgress?.({
+        step: 'fetchingFile',
+        message: `Fetching: ${file.path}`,
+        current: filesWithContent.length + 1,
+        total: sourceFiles.length,
+      });
+      
       const fileContent = await getSpecFile(sourceSpecId, file.path);
       if (fileContent && fileContent.content) {
         filesWithContent.push({
           path: file.path,
           content: fileContent.content,
-          type: file.type,
-          name: file.name,
+          type: file.type, // "ROOT" or "DEFAULT"
         });
       } else {
         result.errors.push(`Failed to get content for file: ${file.path}`);
@@ -454,49 +459,24 @@ export const copySpec = async (sourceSpecId, sourceSpecName, targetWorkspaceId, 
       return result;
     }
 
-    // Step 4: Create new spec in target workspace
-    onProgress?.({ step: 'create', message: `Creating spec in target workspace...` });
-    const createResult = await createSpec(targetWorkspaceId, sourceSpecName, description);
-    
+    // Step 3: Create spec with all files in one API call
+    onProgress?.({ step: 'create', message: `Creating spec with ${filesWithContent.length} file(s)...` });
+    const createResult = await createSpec(
+      targetWorkspaceId,
+      sourceSpecName,
+      sourceSpecType, // e.g., "OPENAPI:3.0"
+      filesWithContent // Array of { path, content, type }
+    );
+
     if (!createResult.success) {
       result.errors.push(`Failed to create spec: ${createResult.error}`);
       return result;
     }
 
     result.newSpecId = createResult.spec.id;
-
-    // Step 5: Create files in the new spec (ROOT file first)
-    const rootFile = filesWithContent.find(f => f.type === 'ROOT');
-    const otherFiles = filesWithContent.filter(f => f.type !== 'ROOT');
-    const orderedFiles = rootFile ? [rootFile, ...otherFiles] : filesWithContent;
-
-    onProgress?.({ step: 'copyFiles', message: `Copying ${orderedFiles.length} file(s)...` });
-
-    for (let i = 0; i < orderedFiles.length; i++) {
-      const file = orderedFiles[i];
-      onProgress?.({ 
-        step: 'copyFile', 
-        message: `Copying file: ${file.path}`,
-        current: i + 1,
-        total: orderedFiles.length,
-      });
-
-      const fileResult = await createSpecFile(result.newSpecId, file.path, file.content);
-      
-      if (fileResult.success) {
-        result.filesCopied++;
-        
-        if (file.type === 'ROOT' && i > 0) {
-          await updateSpecFileType(result.newSpecId, file.path, 'ROOT');
-        }
-      } else {
-        result.errors.push(`Failed to create file ${file.path}: ${fileResult.error}`);
-      }
-
-      await new Promise(resolve => setTimeout(resolve, 300));
-    }
-
-    result.success = result.filesCopied > 0;
+    result.filesCopied = filesWithContent.length;
+    result.success = true;
+    
     return result;
 
   } catch (error) {
@@ -535,20 +515,21 @@ export const copySpecs = async (sourceWorkspaceId, targetWorkspaceId, onProgress
 
     onProgress?.({
       phase: 'specs',
-      message: `Copying spec: ${spec.name}`,
+      message: `Copying spec: ${spec.name} (${spec.type})`,
       currentItem: spec.name,
       current: i + 1,
       total: sourceSpecs.length,
       progress: progressPercent,
     });
 
-    const copyResult = await copySpec(spec.id, spec.name, targetWorkspaceId);
+    const copyResult = await copySpec(spec.id, spec.name, spec.type, targetWorkspaceId);
 
     if (copyResult.success) {
       results.copied.push({
         originalSpecId: spec.id,
         newSpecId: copyResult.newSpecId,
         name: spec.name,
+        type: spec.type,
         filesCopied: copyResult.filesCopied,
       });
     } else {

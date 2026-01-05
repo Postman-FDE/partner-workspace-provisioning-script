@@ -847,62 +847,28 @@ const SpecsAPI = {
   },
 
   /**
-   * Create a new spec in a workspace
+   * Create a new spec in a workspace with files
    * POST /specs?workspaceId={workspaceId}
+   * 
+   * @param {string} workspaceId - Target workspace ID
+   * @param {string} name - Spec name
+   * @param {string} type - Spec type (e.g., "OPENAPI:3.0", "OPENAPI:3.1", "ASYNCAPI:2.0")
+   * @param {Array} files - Array of files with { path, content, type } where type is "ROOT" or "DEFAULT"
    */
-  async create(workspaceId, name, description = '') {
+  async create(workspaceId, name, type, files) {
     try {
-      const response = await api.post(`/specs?workspaceId=${workspaceId}`, {
+      const requestBody = {
         name,
-        description,
-      });
+        type,
+        files,
+      };
+      
+      const response = await api.post(`/specs?workspaceId=${workspaceId}`, requestBody);
       return { success: true, spec: response.data };
     } catch (error) {
       return {
         success: false,
-        error: logApiError('Create spec', error, { name })
-      };
-    }
-  },
-
-  /**
-   * Create a file in a spec
-   * POST /specs/{specId}/files
-   * 
-   * @param {string} specId - The spec ID
-   * @param {string} path - File path (e.g., "index.json" or "components/schemas.json")
-   * @param {string} content - File content as string
-   */
-  async createFile(specId, path, content) {
-    try {
-      const response = await api.post(`/specs/${specId}/files`, {
-        path,
-        content,
-      });
-      return { success: true, file: response.data };
-    } catch (error) {
-      return {
-        success: false,
-        error: logApiError('Create spec file', error, { specId, path })
-      };
-    }
-  },
-
-  /**
-   * Update a spec file's type (ROOT or DEFAULT)
-   * PATCH /specs/{specId}/files/{filePath}
-   */
-  async updateFileType(specId, filePath, type) {
-    try {
-      const encodedPath = encodeURIComponent(filePath);
-      const response = await api.patch(`/specs/${specId}/files/${encodedPath}`, {
-        type,
-      });
-      return { success: true, file: response.data };
-    } catch (error) {
-      return {
-        success: false,
-        error: logApiError('Update spec file type', error, { specId, filePath })
+        error: logApiError('Create spec', error, { name, fileCount: files?.length })
       };
     }
   },
@@ -915,14 +881,13 @@ const SpecsHelper = {
   /**
    * Copy a single spec with all its files
    * 
-   * Workflow:
-   * 1. Get spec details
-   * 2. Get all files in the spec
-   * 3. Get content for each file
-   * 4. Create new spec in target workspace
-   * 5. Create all files in the new spec (ROOT file first)
+   * Simplified Workflow (using Create Spec API with all files at once):
+   * 1. Get all specs (provides: id, name, type)
+   * 2. Get a spec's files (provides: file metadata with id, path, type)
+   * 3. For each file, get content (GET /specs/{specId}/files/{filePath})
+   * 4. Create spec with all files in one API call
    */
-  async copySpec(sourceSpecId, sourceSpecName, targetWorkspaceId, onProgress) {
+  async copySpec(sourceSpecId, sourceSpecName, sourceSpecType, targetWorkspaceId, onProgress) {
     const result = {
       success: false,
       specName: sourceSpecName,
@@ -933,12 +898,7 @@ const SpecsHelper = {
     };
 
     try {
-      // Step 1: Get spec details
-      onProgress?.({ step: 'details', message: `Getting spec details for: ${sourceSpecName}` });
-      const specDetails = await SpecsAPI.getDetails(sourceSpecId);
-      const description = specDetails?.description || '';
-
-      // Step 2: Get all files in the source spec
+      // Step 1: Get all files metadata for the source spec
       onProgress?.({ step: 'files', message: `Getting files for: ${sourceSpecName}` });
       const sourceFiles = await SpecsAPI.getFiles(sourceSpecId);
       result.totalFiles = sourceFiles.length;
@@ -949,18 +909,24 @@ const SpecsHelper = {
         return result;
       }
 
-      // Step 3: Get content for each file
+      // Step 2: Get content for each file
       onProgress?.({ step: 'content', message: `Fetching ${sourceFiles.length} file(s) content...` });
       const filesWithContent = [];
       
       for (const file of sourceFiles) {
+        onProgress?.({
+          step: 'fetchingFile',
+          message: `Fetching: ${file.path}`,
+          current: filesWithContent.length + 1,
+          total: sourceFiles.length,
+        });
+        
         const fileContent = await SpecsAPI.getFile(sourceSpecId, file.path);
         if (fileContent && fileContent.content) {
           filesWithContent.push({
             path: file.path,
             content: fileContent.content,
-            type: file.type,
-            name: file.name,
+            type: file.type, // "ROOT" or "DEFAULT"
           });
         } else {
           result.errors.push(`Failed to get content for file: ${file.path}`);
@@ -973,50 +939,24 @@ const SpecsHelper = {
         return result;
       }
 
-      // Step 4: Create new spec in target workspace
-      onProgress?.({ step: 'create', message: `Creating spec in target workspace...` });
-      const createResult = await SpecsAPI.create(targetWorkspaceId, sourceSpecName, description);
-      
+      // Step 3: Create spec with all files in one API call
+      onProgress?.({ step: 'create', message: `Creating spec with ${filesWithContent.length} file(s)...` });
+      const createResult = await SpecsAPI.create(
+        targetWorkspaceId,
+        sourceSpecName,
+        sourceSpecType, // e.g., "OPENAPI:3.0"
+        filesWithContent // Array of { path, content, type }
+      );
+
       if (!createResult.success) {
         result.errors.push(`Failed to create spec: ${createResult.error}`);
         return result;
       }
 
       result.newSpecId = createResult.spec.id;
-
-      // Step 5: Create files in the new spec (ROOT file first)
-      const rootFile = filesWithContent.find(f => f.type === 'ROOT');
-      const otherFiles = filesWithContent.filter(f => f.type !== 'ROOT');
-      const orderedFiles = rootFile ? [rootFile, ...otherFiles] : filesWithContent;
-
-      onProgress?.({ step: 'copyFiles', message: `Copying ${orderedFiles.length} file(s)...` });
-
-      for (let i = 0; i < orderedFiles.length; i++) {
-        const file = orderedFiles[i];
-        onProgress?.({ 
-          step: 'copyFile', 
-          message: `Copying file: ${file.path}`,
-          current: i + 1,
-          total: orderedFiles.length,
-        });
-
-        const fileResult = await SpecsAPI.createFile(result.newSpecId, file.path, file.content);
-        
-        if (fileResult.success) {
-          result.filesCopied++;
-          
-          // If ROOT file is not first, update its type
-          if (file.type === 'ROOT' && i > 0) {
-            await SpecsAPI.updateFileType(result.newSpecId, file.path, 'ROOT');
-          }
-        } else {
-          result.errors.push(`Failed to create file ${file.path}: ${fileResult.error}`);
-        }
-
-        await delay(300);
-      }
-
-      result.success = result.filesCopied > 0;
+      result.filesCopied = filesWithContent.length;
+      result.success = true;
+      
       return result;
 
     } catch (error) {
@@ -1043,15 +983,16 @@ const SpecsHelper = {
     
     for (let i = 0; i < sourceSpecs.length; i++) {
       const spec = sourceSpecs[i];
-      log.info(`\n  [${i + 1}/${sourceSpecs.length}] Processing spec: ${spec.name}`);
+      log.info(`\n  [${i + 1}/${sourceSpecs.length}] Processing spec: ${spec.name} (${spec.type})`);
       
       const copyResult = await this.copySpec(
         spec.id,
         spec.name,
+        spec.type, // e.g., "OPENAPI:3.0", "OPENAPI:3.1", "ASYNCAPI:2.0"
         targetWorkspaceId,
         (progress) => {
-          if (progress.step === 'copyFile') {
-            log.detail(`  Copying file (${progress.current}/${progress.total}): ${progress.message.replace('Copying file: ', '')}`);
+          if (progress.step === 'fetchingFile') {
+            log.detail(`  ${progress.message} (${progress.current}/${progress.total})`);
           }
         }
       );
