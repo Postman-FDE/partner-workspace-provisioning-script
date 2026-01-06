@@ -1,508 +1,590 @@
-# Postman Partner Workspace Provisioning Script
+# Postman Workspace Provisioning Tools
 
-Automated scripts for creating and managing Postman partner workspaces. Copies all collections, environments, mock servers, and API specs from a source workspace to a new or existing target workspace.
+Comprehensive tooling for automated Postman workspace provisioning and management. Available in two versions:
+- **CLI Version**: Command-line scripts for manual workspace operations
+- **Web Version**: JavaScript library for integration into web applications
+
+## Table of Contents
+- [Overview](#overview)
+- [Features](#features)
+- [Installation](#installation)
+- [Version 1: CLI Scripts](#version-1-cli-scripts)
+  - [Setup](#cli-setup)
+  - [Usage](#cli-usage)
+  - [Configuration](#cli-configuration)
+- [Version 2: Web Library](#version-2-web-library)
+  - [Setup](#web-setup)
+  - [Usage](#web-usage)
+  - [API Reference](#web-api-reference)
+- [Workflow Details](#workflow-details)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+## Overview
+
+These tools automate the process of creating and managing Postman partner workspaces. They copy collections, create mock servers, manage environments, and transfer API specifications from a source workspace to a target workspace.
+
+### Provisioning Workflow
+1. **Copy Collections**: Fork all collections from source to target workspace
+2. **Create Mock Servers**: Generate mock servers for each collection
+3. **Copy Environments**: Duplicate environment configurations
+4. **Update Mock Environment**: Create/update "Mock Env" with mock server URLs
+5. **Copy API Specs**: Transfer all API specification files
+
+### Reset Workflow
+Deletes workspace resources in reverse order:
+1. Delete API Specs
+2. Delete Mock Servers
+3. Delete Environments
+4. Delete Collections
+
+---
 
 ## Features
 
-- **Fully Automated** - Just configure environment variables and run
-- **Workspace Creation** - Automatically creates new partner workspaces when no target is specified
-- **Complete Copy** - Copies collections, environments, mock servers, and API specs
-- **Reset Functionality** - Clean slate option to restore workspace to blank state
+✅ **Complete Workspace Provisioning**
+- Automated collection forking
+- Mock server creation and URL management
+- Environment variable handling
+- Multi-file API specification copying
+
+✅ **Safe Reset Functionality**
+- Dependency-aware deletion order
+- Confirmation prompts (CLI only)
+- Detailed error reporting
+
+✅ **Flexible Configuration**
+- Use existing workspaces or create new ones
+- Environment variable configuration
+- Partner/team/private workspace types
+
+✅ **Robust Error Handling**
+- Detailed error logging
+- Progress callbacks
+- Rate limit management
 
 ---
 
-## Quick Start
-
-### 1. Install Dependencies
+## Installation
 
 ```bash
+# Clone the repository
+git clone <repository-url>
+cd fde-pw-creation-script
+
+# Install dependencies
 npm install
 ```
 
-### 2. Create Configuration File
+---
 
-Create a `.env` file in the project root:
+## Version 1: CLI Scripts
 
-```bash
-# REQUIRED: Your Postman API Key
-POSTMAN_API_KEY=PMAK-xxxxxxxx-xxxxxxxxxxxxxxxxxxxx
+Command-line tools for interactive workspace management.
 
-# REQUIRED: Source workspace ID (workspace to copy FROM)
-POSTMAN_SOURCE_WORKSPACE_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+### CLI Setup
 
-# OPTIONAL: Target workspace ID
-# - If provided: Script copies content to this existing workspace
-# - If omitted: Script creates a new partner workspace
-POSTMAN_TARGET_WORKSPACE_ID=
+1. **Create `.env` file** in the project root:
 
-# OPTIONAL: Name for new workspace (only used when no target ID is provided)
-# Default: "Partner Workspace"
+```env
+# Required
+POSTMAN_API_KEY=your_api_key_here
+POSTMAN_SOURCE_WORKSPACE_ID=your_source_workspace_id
+
+# Optional (if not provided, will prompt/create new workspace)
+POSTMAN_TARGET_WORKSPACE_ID=your_target_workspace_id
 POSTMAN_WORKSPACE_NAME=My Partner Workspace
 ```
 
-**How the scripts use these variables:**
+2. **Get your Postman API Key**:
+   - Go to [Postman Account Settings](https://go.postman.co/settings/me/api-keys)
+   - Click "Generate API Key"
+   - Copy the key to your `.env` file
 
-| Variable | Provision Script | Reset Script |
-|----------|------------------|--------------|
-| `POSTMAN_API_KEY` | Required for API authentication | Required for API authentication |
-| `POSTMAN_SOURCE_WORKSPACE_ID` | Copy content FROM this workspace | Not used |
-| `POSTMAN_TARGET_WORKSPACE_ID` | Copy content TO this workspace (or create new if empty) | Reset this workspace |
-| `POSTMAN_WORKSPACE_NAME` | Name for new workspace (if creating) | Not used |
+3. **Get Workspace IDs**:
+   - Open Postman
+   - Navigate to your workspace
+   - Copy the ID from the URL: `https://app.getpostman.com/workspace/<WORKSPACE_ID>`
 
-### 3. Run Provisioning
+### CLI Usage
+
+#### Provisioning a Workspace
 
 ```bash
-# Interactive mode (default) - shows config and prompts for options
+# Run the provisioning script
 npm run provision
 
-# Skip prompts and run with .env defaults
-npm run provision -- --yes
-
-# Or with a custom workspace name
-npm run provision -- --name "ACME Corp Partner Workspace"
-
-# Or copy into an existing workspace
-npm run provision -- --target-workspace-id "existing-workspace-id"
+# Or directly with Node
+node provision.js
 ```
 
----
+**Interactive Flow:**
+- If no target workspace ID is configured, you'll be prompted for a new workspace name
+- Review the configuration
+- Confirm to start provisioning
 
-## Getting Your Configuration Values
-
-### Postman API Key
-
-1. Log in to [postman.com](https://postman.com)
-2. Click your avatar → **Account Settings**
-3. Go to **API Keys** tab
-4. Click **Generate API Key**
-5. Copy the key (starts with `PMAK-`)
-
-> ⚠️ Keep your API key secret. Never commit it to version control.
-
-### Source Workspace ID
-
-1. Open Postman and navigate to your source workspace
-2. Click on the workspace name in the sidebar
-3. Go to **Workspace Settings** (gear icon)
-4. Copy the **Workspace ID**
-
-### Target Workspace ID (Optional)
-
-- **Leave blank** to create a new partner workspace automatically
-- **Provide an ID** to copy content into an existing workspace
-
----
-
-## Scripts
-
-### Provision Script (`provision.js`)
-
-Creates and provisions a new workspace by copying all content from the source workspace.
-
-**Interactive Mode (Default):**
+**With Flags:**
 ```bash
-# Shows current configuration and menu to modify settings
-npm run provision
+# Skip interactive prompts and use .env configuration
+node provision.js --yes
 ```
 
-When you run `npm run provision`, you'll see an interactive menu:
-
-```
-╔════════════════════════════════════════════════════════════╗
-║      Postman Partner Workspace Provisioning Script        ║
-╚════════════════════════════════════════════════════════════╝
-
-─────────────────────────────────────────────────────────────
-                    Current Configuration
-─────────────────────────────────────────────────────────────
-
-  API Key:          ✓ Configured
-  Source Workspace: abc123...
-  Target Workspace: Will create new
-  New Workspace Name: Partner Workspace
-  Workspace Type:   partner
-
-─────────────────────────────────────────────────────────────
-
-  Options:
-  [1] Run with current settings
-  [2] Change workspace name (create new workspace)
-  [3] Use existing target workspace ID
-  [4] Exit
-
-Select option [1-4]: 
-```
-
-**Non-Interactive Mode:**
-```bash
-# Skip prompts and run with .env defaults
-npm run provision -- --yes
-node provision.js -y
-
-# With custom options
-node provision.js --name "Custom Workspace Name"
-node provision.js --target-workspace-id "existing-id"
-node provision.js -n "Short Name" -t "target-id"
-```
-
-**What it copies:**
-- ✅ All collections (forked to maintain link to source)
-- ✅ All environments (with variable values)
-- ✅ All mock servers (recreated and linked to new collections)
-- ✅ All API specs (with schemas and versions)
-
-**Output:**
-```
-╔════════════════════════════════════════════════════════════╗
-║      Postman Partner Workspace Provisioning Script        ║
-╚════════════════════════════════════════════════════════════╝
-
-▸ Validating configuration...
-✓ API key valid. Authenticated as: your-username
-✓ Source workspace: Template Workspace
-
-▸ Initializing target workspace...
-ℹ Creating new partner workspace: "Partner Workspace"...
-✓ Created new workspace: Partner Workspace (ID: abc123...)
-
-▸ Copying collections...
-ℹ Found 5 collection(s) to copy
-✓ Forked: Authentication API
-✓ Forked: Payment Services
-...
-
-═══════════════════════════════════════════════════════════════
-                      PROVISIONING COMPLETE
-═══════════════════════════════════════════════════════════════
-
-Workspace: Partner Workspace
-Workspace ID: abc123-def456-...
-Workspace Created: Yes (new)
-
-Collections: 5/5 copied
-Environments: 2/2 copied
-Mock Servers: 1/1 recreated
-API Specs: 3/3 copied
-
-✓ Done!
-```
-
----
-
-### Reset Script (`reset.js`)
-
-Removes all content from a workspace, returning it to a blank state.
+#### Resetting a Workspace
 
 ```bash
-# Interactive mode (uses POSTMAN_TARGET_WORKSPACE_ID from .env if set)
+# Run the reset script
 npm run reset
 
-# Using node directly
+# Or directly with Node
 node reset.js
-
-# With specific workspace ID (overrides .env)
-node reset.js --workspace-id "workspace-to-reset"
-
-# Skip confirmation prompt
-node reset.js --confirm
-node reset.js -y
-
-# Full non-interactive reset
-node reset.js --workspace-id "workspace-id" --confirm
 ```
 
-**Deletion Order (reverse of provisioning):**
-1. 🗑️ Specs (deleted first)
-2. 🗑️ Mock servers (depend on collections)
-3. 🗑️ Environments
-4. 🗑️ Collections (deleted last)
+**Interactive Flow:**
+- If no target workspace ID is configured, you'll be prompted to enter one
+- Review what will be deleted
+- Type "RESET" to confirm
 
-> ⚠️ **Warning:** This action cannot be undone!
-
-**Interactive Mode:**
-
-If `POSTMAN_TARGET_WORKSPACE_ID` is not set in `.env`, the script will prompt you to enter a workspace ID:
-
-```
-╔═══════════════════════════════════════════════════════════════╗
-║              POSTMAN WORKSPACE RESET SCRIPT                   ║
-╚═══════════════════════════════════════════════════════════════╝
-
-─────────────────────────────────────────────────────────────
-Configuration
-
-Current settings:
-  API Key:          ✓ Configured
-  Target Workspace: (not set)
-
-Enter workspace ID to reset: _
+**With Flags:**
+```bash
+# Skip confirmation prompt (use with caution!)
+node reset.js --yes
 ```
 
----
+### CLI Configuration
 
-## Environment Variables Reference
+#### Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `POSTMAN_API_KEY` | ✅ Yes | Your Postman API key |
-| `POSTMAN_SOURCE_WORKSPACE_ID` | ✅ Yes | Workspace ID to copy from |
-| `POSTMAN_TARGET_WORKSPACE_ID` | ❌ No | Target workspace ID (creates new if omitted) |
+| `POSTMAN_SOURCE_WORKSPACE_ID` | ✅ Yes | Source workspace to copy from |
+| `POSTMAN_TARGET_WORKSPACE_ID` | ❌ No | Target workspace (creates new if not provided) |
 | `POSTMAN_WORKSPACE_NAME` | ❌ No | Name for new workspace (default: "Partner Workspace") |
 
-**Legacy Support:** The scripts also support `VITE_` prefixed variables for compatibility with Vite.js projects:
-- `VITE_POSTMAN_API_KEY`
-- `VITE_POSTMAN_SOURCE_WORKSPACE_ID`
-- `VITE_POSTMAN_TARGET_WORKSPACE_ID`
-
----
-
-## Command Line Options
-
-### Provision Script
-
-| Flag | Alias | Description |
-|------|-------|-------------|
-| `--yes` | `-y` | Skip interactive prompts, run with defaults |
-| `--name` | `-n` | Name for the new workspace |
-| `--target-workspace-id` | `-t` | Use existing workspace instead of creating new |
-
-### Reset Script
-
-| Flag | Alias | Description |
-|------|-------|-------------|
-| `--workspace-id` | `-w` | ID of workspace to reset |
-| `--confirm` | `-y` | Skip confirmation prompt |
-
----
-
-## Example Workflows
-
-### Create a New Partner Workspace
-
-```bash
-# Set up environment
-export POSTMAN_API_KEY="PMAK-..."
-export POSTMAN_SOURCE_WORKSPACE_ID="source-workspace-id"
-export POSTMAN_WORKSPACE_NAME="ACME Corp Integration"
-
-# Run provisioning
-npm run provision
-```
-
-### Copy to Existing Workspace
-
-```bash
-# Set up environment
-export POSTMAN_API_KEY="PMAK-..."
-export POSTMAN_SOURCE_WORKSPACE_ID="source-workspace-id"
-export POSTMAN_TARGET_WORKSPACE_ID="existing-workspace-id"
-
-# Run provisioning
-npm run provision
-```
-
-### Reset and Re-provision
-
-```bash
-# Reset the workspace
-npm run reset -- --workspace-id "workspace-id" --confirm
-
-# Re-provision with fresh content
-npm run provision -- --target-workspace-id "workspace-id"
-```
-
----
-
-## Project Structure
-
-```
-fde-pw-creation-script/
-├── provision.js        # Main provisioning script
-├── reset.js           # Workspace reset script
-├── postmanService.js  # API service module (for import use)
-├── package.json       # Dependencies and npm scripts
-├── .env               # Your configuration (create this)
-└── README.md          # This file
-```
-
----
-
-## Files Overview
-
-### `provision.js`
-Standalone executable script for provisioning. Contains all necessary API functions built-in. Run directly with `node provision.js`.
-
-### `reset.js`
-Standalone executable script for resetting workspaces. Contains all necessary API functions built-in. Run directly with `node reset.js`.
-
-### `postmanService.js`
-Module with exported functions for importing into other projects (e.g., React/Vite apps). Use this if you need programmatic access to the API functions.
-
----
-
-## Modular Architecture
-
-The provisioning script is built with a modular architecture that separates concerns into **API modules** and **Helper modules**.
-
-### Workflow Steps
-
-The provisioning follows this exact order:
-
-1. **Copy Collections** - Fork all collections from source to target workspace
-2. **Create Mock Servers** - Create a mock server for each copied collection
-3. **Copy Environments** - Copy all environment templates from source workspace
-4. **Update Mock Env** - Update or create "Mock Env" with new mock server URLs
-5. **Copy Specs** - Copy all API specifications with their files
-
-### Module Structure
-
-#### In-Memory Store
-```javascript
-Store = {
-  collections: Map(),    // sourceUid -> { targetUid, name }
-  environments: Map(),   // sourceUid -> { targetUid, name }
-  mocks: Map(),         // collectionUid -> { mockId, mockUrl, name }
-  specs: Map(),         // sourceId -> { targetId, name, filesCopied }
-}
-```
-
-#### API Modules (Postman API Calls)
-These modules wrap Postman API endpoints:
-
-| Module | Functions | Endpoints |
-|--------|-----------|-----------|
-| `WorkspaceAPI` | `validateApiKey()`, `getWorkspace()`, `createWorkspace()` | `/me`, `/workspaces` |
-| `CollectionsAPI` | `getAll()`, `getDetails()`, `fork()` | `/collections`, `/collections/fork` |
-| `MocksAPI` | `getAll()`, `create()`, `getDetails()` | `/mocks` |
-| `EnvironmentsAPI` | `getAll()`, `getDetails()`, `create()`, `update()`, `patch()` | `/environments` |
-| `SpecsAPI` | `getAll()`, `getDetails()`, `getFiles()`, `getFile()`, `create()`, `createFile()`, `updateFileType()` | `/specs`, `/specs/{id}/files` |
-
-#### Helper Modules (Business Logic)
-These modules manage complex operations:
-
-| Module | Functions | Purpose |
-|--------|-----------|---------|
-| `CollectionsHelper` | `copyAll()`, `getTargetUidByName()` | Bulk copy collections, store mappings |
-| `MocksHelper` | `createForAllCollections()`, `generateMockUrlVariables()` | Create mocks, generate env variables |
-| `EnvironmentsHelper` | `copyAll()`, `findMockEnv()`, `updateOrCreateMockEnv()` | Copy envs, manage Mock Env |
-| `SpecsHelper` | `copySpec()`, `copyAll()` | Copy specs with all files |
-
-### Exported Modules
-
-Both scripts export their modules for programmatic use:
+#### Command Line Options
 
 **Provision Script:**
-```javascript
-import {
-  WorkspaceAPI,
-  CollectionsAPI,
-  CollectionsHelper,
-  MocksAPI,
-  MocksHelper,
-  EnvironmentsAPI,
-  EnvironmentsHelper,
-  SpecsAPI,
-  SpecsHelper,
-  Store,
-  runProvisioningWorkflow,
-} from './provision.js';
-
-// Use individual API calls
-const collections = await CollectionsAPI.getAll(workspaceId);
-
-// Use helper functions
-const results = await CollectionsHelper.copyAll(sourceId, targetId);
-
-// Access the in-memory store
-console.log(Store.getAllMockUrls());
-```
+- `--yes`: Skip interactive prompts
+- `--workspace-id <id>`: Override target workspace ID
+- `--workspace-name <name>`: Override workspace name
 
 **Reset Script:**
+- `--yes`: Skip confirmation prompt
+- `--workspace-id <id>`: Override target workspace ID
+
+### CLI Example Workflows
+
+#### Create a New Partner Workspace
+
+```bash
+# 1. Configure .env with source workspace only
+POSTMAN_API_KEY=PMAK-...
+POSTMAN_SOURCE_WORKSPACE_ID=abc-123
+
+# 2. Run provisioning
+npm run provision
+
+# 3. Follow prompts to name your new workspace
+# Enter name for new workspace [Partner Workspace]: My New Workspace
+# Proceed with provisioning? (Y/N): Y
+```
+
+#### Use Existing Target Workspace
+
+```bash
+# 1. Configure .env with both workspaces
+POSTMAN_API_KEY=PMAK-...
+POSTMAN_SOURCE_WORKSPACE_ID=abc-123
+POSTMAN_TARGET_WORKSPACE_ID=def-456
+
+# 2. Run provisioning (no prompts needed)
+npm run provision
+```
+
+#### Reset a Workspace
+
+```bash
+# Run reset
+npm run reset
+
+# Confirm by typing RESET
+Type "RESET" to confirm: RESET
+```
+
+---
+
+## Version 2: Web Library
+
+JavaScript module for programmatic workspace management. Perfect for integrating into web applications, dashboards, or automation systems.
+
+### Web Setup
+
+1. **Install as a dependency** or copy `postmanService.js` to your project
+
+2. **Configure environment variables** (for Vite/Create React App):
+
+```env
+VITE_POSTMAN_API_KEY=your_api_key_here
+VITE_POSTMAN_SOURCE_WORKSPACE_ID=your_source_workspace_id
+VITE_POSTMAN_TARGET_WORKSPACE_ID=your_target_workspace_id (optional)
+```
+
+3. **Import the module**:
+
 ```javascript
 import {
-  WorkspaceAPI,
-  CollectionsAPI,
-  CollectionsHelper,
-  MocksAPI,
-  MocksHelper,
-  EnvironmentsAPI,
-  EnvironmentsHelper,
-  SpecsAPI,
-  SpecsHelper,
-  Store,
-  runResetWorkflow,
-} from './reset.js';
-
-// Scan workspace
-await CollectionsHelper.scanAll(workspaceId);
-
-// Delete all scanned items
-const results = await CollectionsHelper.deleteAll();
-
-// Access scanned items in store
-console.log(Store.collections);
+  provisionWorkspace,
+  resetWorkspace,
+  validateApiKey,
+  getWorkspace,
+} from './postmanService.js';
 ```
 
-### Reset Script Module Structure
+### Web Usage
 
-The reset script follows the same modular pattern:
+#### Provisioning a Workspace
 
-| Module | Functions | Purpose |
-|--------|-----------|---------|
-| `CollectionsHelper` | `scanAll()`, `deleteAll()` | Scan and bulk delete collections |
-| `MocksHelper` | `scanAll()`, `deleteAll()` | Scan and bulk delete mocks |
-| `EnvironmentsHelper` | `scanAll()`, `deleteAll()` | Scan and bulk delete environments |
-| `SpecsHelper` | `scanAll()`, `deleteAll()` | Scan and bulk delete specs |
-
-**In-Memory Store (Reset):**
 ```javascript
-Store = {
-  collections: [],    // Array of collections found
-  environments: [],   // Array of environments found
-  mocks: [],         // Array of mocks found
-  specs: [],         // Array of specs found
+// Basic example - create new workspace
+const results = await provisionWorkspace({
+  sourceWorkspaceId: 'source-workspace-id',
+  workspaceName: 'My Partner Workspace',
+  workspaceType: 'partner'
+}, (progress) => {
+  console.log(`${progress.phase}: ${progress.message}`);
+  console.log(`Progress: ${progress.progress}%`);
+});
+
+console.log('Provisioning complete!', results);
+```
+
+```javascript
+// Use existing workspace
+const results = await provisionWorkspace({
+  sourceWorkspaceId: 'source-workspace-id',
+  targetWorkspaceId: 'existing-target-workspace-id',
+}, (progress) => {
+  console.log(`${progress.phase}: ${progress.message}`);
+});
+```
+
+```javascript
+// With React component
+function WorkspaceProvisioner() {
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState('');
+  const [results, setResults] = useState(null);
+
+  const handleProvision = async () => {
+    try {
+      const result = await provisionWorkspace({
+        sourceWorkspaceId: 'abc-123',
+        workspaceName: 'New Workspace',
+      }, (progressData) => {
+        setProgress(progressData.progress);
+        setStatus(progressData.message);
+      });
+      
+      setResults(result);
+    } catch (error) {
+      console.error('Provisioning failed:', error);
+    }
+  };
+
+  return (
+    <div>
+      <button onClick={handleProvision}>Provision Workspace</button>
+      <div>Status: {status}</div>
+      <div>Progress: {progress}%</div>
+      {results && <pre>{JSON.stringify(results, null, 2)}</pre>}
+    </div>
+  );
 }
 ```
+
+#### Resetting a Workspace
+
+```javascript
+// Reset entire workspace
+const results = await resetWorkspace(
+  'workspace-id-to-reset',
+  (progress) => {
+    console.log(`${progress.phase}: ${progress.message}`);
+    console.log(`Deleted: ${progress.deleted}/${progress.total}`);
+  }
+);
+
+console.log('Reset complete!', results);
+```
+
+```javascript
+// Partial reset - only delete specific resources
+const results = await resetWorkspace(
+  'workspace-id',
+  (progress) => console.log(progress),
+  {
+    includeSpecs: true,
+    includeMocks: true,
+    includeEnvironments: false,  // Keep environments
+    includeCollections: false,   // Keep collections
+  }
+);
+```
+
+```javascript
+// With React component
+function WorkspaceResetter() {
+  const [status, setStatus] = useState('');
+  const [results, setResults] = useState(null);
+
+  const handleReset = async () => {
+    if (!confirm('Are you sure? This will delete all resources!')) {
+      return;
+    }
+
+    try {
+      const result = await resetWorkspace(
+        'workspace-id',
+        (progressData) => {
+          setStatus(progressData.message);
+        }
+      );
+      
+      setResults(result);
+    } catch (error) {
+      console.error('Reset failed:', error);
+    }
+  };
+
+  return (
+    <div>
+      <button onClick={handleReset}>Reset Workspace</button>
+      <div>Status: {status}</div>
+      {results && <pre>{JSON.stringify(results, null, 2)}</pre>}
+    </div>
+  );
+}
+```
+
+### Web API Reference
+
+#### `provisionWorkspace(options, onProgress)`
+
+Provisions a complete workspace with all resources.
+
+**Parameters:**
+```javascript
+{
+  sourceWorkspaceId: string,        // Required: Source workspace ID
+  targetWorkspaceId?: string,       // Optional: Existing target workspace
+  workspaceName?: string,           // Required if creating new workspace
+  workspaceType?: string,           // Optional: 'partner' | 'team' | 'private' (default: 'partner')
+}
+```
+
+**Progress Callback:**
+```javascript
+(progress) => {
+  progress.phase      // Current phase: 'validation' | 'workspace' | 'collections' | 'mocks' | 'environments' | 'mockEnv' | 'specs' | 'complete' | 'error'
+  progress.message    // Human-readable status message
+  progress.progress   // Overall progress percentage (0-100)
+  progress.current    // Current item number (for lists)
+  progress.total      // Total items (for lists)
+}
+```
+
+**Returns:**
+```javascript
+{
+  workspace: object,           // Workspace details
+  workspaceCreated: boolean,   // True if new workspace was created
+  collections: {
+    total: number,
+    success: number,
+    failed: array,
+    successData: array
+  },
+  mocks: {
+    total: number,
+    success: number,
+    failed: array,
+    urls: array              // Mock server URLs
+  },
+  environments: {
+    total: number,
+    success: number,
+    failed: array,
+    successData: array
+  },
+  mockEnv: {
+    success: boolean,
+    action: 'created' | 'updated' | null
+  },
+  specs: {
+    total: number,
+    success: number,
+    failed: array,
+    successData: array
+  },
+  errors: array              // All errors encountered
+}
+```
+
+#### `resetWorkspace(workspaceId, onProgress, options)`
+
+Resets a workspace by deleting all resources.
+
+**Parameters:**
+```javascript
+workspaceId: string                 // Required: Workspace ID to reset
+onProgress: function                // Progress callback
+options: {
+  includeSpecs?: boolean,          // Default: true
+  includeMocks?: boolean,          // Default: true
+  includeEnvironments?: boolean,   // Default: true
+  includeCollections?: boolean,    // Default: true
+}
+```
+
+**Progress Callback:**
+```javascript
+(progress) => {
+  progress.phase      // Current phase: 'specs' | 'mocks' | 'environments' | 'collections' | 'complete' | 'error'
+  progress.message    // Human-readable status message
+  progress.deleted    // Number of items deleted
+  progress.total      // Total items to delete
+  progress.currentItem // Name of current item being deleted
+}
+```
+
+**Returns:**
+```javascript
+{
+  deletedSpecs: number,
+  deletedMocks: number,
+  deletedEnvironments: number,
+  deletedCollections: number,
+  totalSpecs: number,
+  totalMocks: number,
+  totalEnvironments: number,
+  totalCollections: number,
+  errors: array
+}
+```
+
+#### Utility Functions
+
+```javascript
+// Validate API key
+const { valid, user, error } = await validateApiKey();
+
+// Get workspace details
+const workspace = await getWorkspace(workspaceId);
+
+// Get workspace summary
+const summary = await getWorkspaceSummary(workspaceId);
+// Returns: { workspaceId, counts: { collections, environments, mocks, apis }, items: {...} }
+
+// Check configuration
+const status = getConfigurationStatus();
+// Returns: { hasApiKey, hasSourceWorkspace, hasTargetWorkspace, isConfigured, message }
+```
+
+---
+
+## Workflow Details
+
+### Provisioning Order
+
+The provisioning follows a specific order to ensure dependencies are met:
+
+1. **Collections** → Forked first as basis for mocks
+2. **Mock Servers** → Created for each collection
+3. **Environments** → Copied with original variables
+4. **Mock Environment** → Updated/created with mock URLs
+5. **API Specs** → Copied last (no dependencies)
+
+### Reset Order
+
+The reset follows the reverse order to handle dependencies:
+
+1. **API Specs** → Deleted first (no dependencies)
+2. **Mock Servers** → Deleted before collections (depend on collections)
+3. **Environments** → Deleted before clearing workspace
+4. **Collections** → Deleted last
+
+### Rate Limiting
+
+Both versions include automatic delays between API calls:
+- Collections: 300ms delay
+- Mocks: 300ms delay
+- Environments: 300ms delay
+- Specs: 500ms delay (larger operations)
 
 ---
 
 ## Troubleshooting
 
-### "POSTMAN_API_KEY is required"
-Ensure your `.env` file exists and contains `POSTMAN_API_KEY=your-key`.
+### Common Issues
 
-### "Invalid API key"
-- Verify the API key is correct and not expired
-- Generate a new key if needed at postman.com → Account Settings → API Keys
+#### "Invalid API key"
+- Verify your API key is correct and hasn't expired
+- Check that the key has appropriate permissions
+- Generate a new key if needed
 
-### "Source workspace not found"
-- Verify `POSTMAN_SOURCE_WORKSPACE_ID` is correct
-- Ensure your API key has access to the source workspace
+#### "Workspace not found"
+- Confirm workspace IDs are correct
+- Ensure you have access to the workspace
+- Check that the workspace hasn't been deleted
 
-### "Target workspace not found"
-- If using an existing workspace, verify the ID is correct
-- Ensure your API key has write access to the target workspace
+#### "Failed to create mock server"
+- Verify the collection exists in the target workspace
+- Check that the collection has requests (mocks need endpoints)
+- Ensure you're not hitting rate limits
 
-### "Failed to create workspace"
-- You may not have permission to create partner workspaces
-- Try using `team` type instead by modifying the script
+#### "Spec files not copying"
+- Confirm specs exist in source workspace
+- Check that spec files have content
+- Verify spec type is supported (OPENAPI:3.0, OPENAPI:3.1, ASYNCAPI:2.0)
 
-### Rate Limiting
-The scripts include built-in delays between API calls. If you hit rate limits:
-- Wait a few minutes and try again
-- Increase delay values in the scripts
+### Debug Mode
+
+Enable detailed logging:
+
+```javascript
+// CLI - Set DEBUG environment variable
+DEBUG=true npm run provision
+
+// Web - Check browser console for detailed logs
+```
+
+### Getting Help
+
+- Check the [Postman API Documentation](https://www.postman.com/postman/workspace/postman-public-workspace/documentation)
+- Review error messages carefully - they often indicate the exact issue
+- Ensure your Postman plan supports the features you're using
 
 ---
 
-## Security Notes
+## File Structure
 
-1. **Never commit `.env` files** - Add `.env` to `.gitignore`
-2. **Rotate API keys** - Generate new keys periodically
-3. **Use minimal permissions** - Only grant necessary workspace access
-4. **Audit access** - Review who can access your source workspace
+```
+fde-pw-creation-script/
+├── provision.js         # CLI provisioning script
+├── reset.js            # CLI reset script
+├── postmanService.js   # Web library module
+├── package.json        # Dependencies and scripts
+├── .env               # Configuration (create this)
+└── README.md          # This file
+```
 
 ---
 
 ## License
 
-ISC
+[Your License Here]
+
+## Contributing
+
+[Contributing Guidelines Here]
