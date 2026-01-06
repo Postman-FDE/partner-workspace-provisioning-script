@@ -542,26 +542,13 @@ function prompt(rl, question) {
 }
 
 async function showInteractiveMenu() {
-  const rl = createReadline();
-  
-  console.log('\x1b[36m─────────────────────────────────────────────────────────────\x1b[0m');
-  console.log('\x1b[1mConfiguration\x1b[0m\n');
-  
-  // Show current config
-  console.log(`Current settings:`);
-  console.log(`  API Key:          ${POSTMAN_API_KEY ? '\x1b[32m✓ Configured\x1b[0m' : '\x1b[31m✗ Missing\x1b[0m'}`);
-  console.log(`  Target Workspace: ${runtimeConfig.workspaceId || '\x1b[31m(not set)\x1b[0m'}`);
-  console.log('');
-  
-  // Check for missing required config
-  if (!POSTMAN_API_KEY) {
-    console.log('\x1b[31m✗ Missing API key. Please set POSTMAN_API_KEY in your .env file.\x1b[0m\n');
-    rl.close();
-    process.exit(1);
-  }
-  
-  // If no workspace ID, prompt for one
+  // If no workspace ID in .env, prompt for one
   if (!runtimeConfig.workspaceId) {
+    const rl = createReadline();
+    console.log('\x1b[36m─────────────────────────────────────────────────────────────\x1b[0m');
+    console.log('\x1b[1mWorkspace ID Required\x1b[0m\n');
+    console.log('  No target workspace ID found in .env file.\n');
+    
     const targetId = await prompt(rl, '\x1b[33mEnter workspace ID to reset: \x1b[0m');
     if (targetId) {
       runtimeConfig.workspaceId = targetId;
@@ -570,9 +557,10 @@ async function showInteractiveMenu() {
       rl.close();
       process.exit(1);
     }
+    
+    rl.close();
   }
   
-  rl.close();
   return true;
 }
 
@@ -586,16 +574,17 @@ async function confirmReset(workspaceName, counts) {
   console.log(`  \x1b[1mWorkspace:\x1b[0m ${workspaceName}`);
   console.log(`  \x1b[1mWorkspace ID:\x1b[0m ${runtimeConfig.workspaceId}`);
   console.log('');
-  console.log('  \x1b[1mThis will permanently delete:\x1b[0m');
-  console.log(`    • ${counts.specs} spec(s)`);
-  console.log(`    • ${counts.mocks} mock server(s)`);
-  console.log(`    • ${counts.environments} environment(s)`);
-  console.log(`    • ${counts.collections} collection(s)`);
+  console.log('  \x1b[1mWorkspace Contents:\x1b[0m');
+  console.log(`    • Collections: ${counts.collections}`);
+  console.log(`    • Environments: ${counts.environments}`);
+  console.log(`    • Mock Servers: ${counts.mocks}`);
+  console.log(`    • Specs: ${counts.specs}`);
   console.log('');
+  console.log('  \x1b[31m\x1b[1mThis will permanently delete all items above!\x1b[0m');
   console.log('\x1b[31m  This action cannot be undone!\x1b[0m');
   console.log('');
   
-  const answer = await prompt(rl, '\x1b[33mType "RESET" to confirm: \x1b[0m');
+  const answer = await prompt(rl, 'Type "RESET" to confirm: ');
   rl.close();
   
   return answer.toUpperCase() === 'RESET';
@@ -648,7 +637,7 @@ async function runResetWorkflow() {
   }
   results.workspace = workspace;
   Store.targetWorkspace = workspace;
-  log.success(`Target workspace: ${workspace.name}`);
+  log.success(`Target workspace found: ${workspace.name}`);
 
   // =========================================================================
   // SCAN WORKSPACE CONTENTS
@@ -676,11 +665,7 @@ async function runResetWorkflow() {
     return results;
   }
 
-  log.info(`Found ${totalItems} item(s) to delete`);
-  log.detail(`Collections: ${summary.collections}`);
-  log.detail(`Environments: ${summary.environments}`);
-  log.detail(`Mock Servers: ${summary.mocks}`);
-  log.detail(`Specs: ${summary.specs}`);
+  log.success(`Found ${totalItems} item(s) in workspace`);
 
   // =========================================================================
   // CONFIRMATION

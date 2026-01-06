@@ -1054,35 +1054,22 @@ function prompt(rl, question) {
 }
 
 async function showInteractiveMenu() {
-  const rl = createReadline();
-  
-  console.log('\x1b[36m─────────────────────────────────────────────────────────────\x1b[0m');
-  console.log('\x1b[1mConfiguration Options\x1b[0m\n');
-  
-  // Show current config
-  console.log(`Current settings:`);
-  console.log(`  Source Workspace ID: ${POSTMAN_SOURCE_WORKSPACE_ID || '\x1b[31m(not set)\x1b[0m'}`);
-  console.log(`  Target Workspace ID: ${runtimeConfig.targetWorkspaceId || '\x1b[33m(will create new)\x1b[0m'}`);
-  console.log(`  New Workspace Name:  ${runtimeConfig.workspaceName}`);
-  console.log('');
-  
-  // Ask about target workspace
-  const useExisting = await prompt(rl, 'Use an existing target workspace? (y/N): ');
-  
-  if (useExisting.toLowerCase() === 'y' || useExisting.toLowerCase() === 'yes') {
-    const targetId = await prompt(rl, `Enter target workspace ID [${runtimeConfig.targetWorkspaceId || 'none'}]: `);
-    if (targetId) {
-      runtimeConfig.targetWorkspaceId = targetId;
-    }
-  } else {
-    runtimeConfig.targetWorkspaceId = null;
+  // If no target workspace ID in .env, prompt for new workspace name
+  if (!runtimeConfig.targetWorkspaceId) {
+    const rl = createReadline();
+    console.log('\x1b[36m─────────────────────────────────────────────────────────────\x1b[0m');
+    console.log('\x1b[1mNew Workspace Configuration\x1b[0m\n');
+    console.log('  No target workspace ID found in .env file.');
+    console.log('  A new workspace will be created.\n');
+    
     const newName = await prompt(rl, `Enter name for new workspace [${runtimeConfig.workspaceName}]: `);
     if (newName) {
       runtimeConfig.workspaceName = newName;
     }
+    
+    rl.close();
   }
   
-  rl.close();
   return true;
 }
 
@@ -1090,25 +1077,17 @@ async function confirmAndRun() {
   const rl = createReadline();
   
   console.log('\n\x1b[36m─────────────────────────────────────────────────────────────\x1b[0m');
-  console.log('\x1b[1mProvisioning Summary\x1b[0m\n');
+  console.log('\x1b[1mReady to Start Provisioning\x1b[0m\n');
   
-  console.log(`  Source Workspace:     ${POSTMAN_SOURCE_WORKSPACE_ID}`);
   if (runtimeConfig.targetWorkspaceId) {
-    console.log(`  Target Workspace:     ${runtimeConfig.targetWorkspaceId} (existing)`);
+    console.log(`  Target: Existing workspace (ID: ${runtimeConfig.targetWorkspaceId})`);
   } else {
-    console.log(`  Target Workspace:     NEW "${runtimeConfig.workspaceName}" (${WORKSPACE_TYPE})`);
+    console.log(`  Target: NEW "${runtimeConfig.workspaceName}" (${WORKSPACE_TYPE})`);
   }
-  
-  console.log('\n  \x1b[1mWorkflow:\x1b[0m');
-  console.log('    1. Copy collections from source workspace');
-  console.log('    2. Create mock servers for each collection');
-  console.log('    3. Copy environments from source workspace');
-  console.log('    4. Update/Create Mock Env with mock URLs');
-  console.log('    5. Copy spec files from source workspace');
   
   console.log('\n\x1b[36m─────────────────────────────────────────────────────────────\x1b[0m');
   
-  const confirm = await prompt(rl, '\nProceed with provisioning? (Y/n): ');
+  const confirm = await prompt(rl, '\nProceed with provisioning? (Y/N): ');
   rl.close();
   
   return confirm.toLowerCase() !== 'n' && confirm.toLowerCase() !== 'no';
