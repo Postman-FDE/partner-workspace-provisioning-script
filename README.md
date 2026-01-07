@@ -12,10 +12,15 @@ Comprehensive tooling for automated Postman workspace provisioning and managemen
   - [Setup](#cli-setup)
   - [Usage](#cli-usage)
   - [Configuration](#cli-configuration)
+  - [Example Workflows](#cli-example-workflows)
 - [Version 2: Web Library](#version-2-web-library)
   - [Setup](#web-setup)
-  - [Usage](#web-usage)
-  - [API Reference](#web-api-reference)
+  - [Available Functions](#available-functions)
+  - [Copy All Functions](#copy-all-functions)
+  - [Custom Selection Functions](#custom-selection-functions)
+  - [Helper Functions](#helper-functions)
+  - [React Integration Examples](#react-integration-examples)
+- [API Reference](#api-reference)
 - [Workflow Details](#workflow-details)
 - [Troubleshooting](#troubleshooting)
 
@@ -49,9 +54,15 @@ Deletes workspace resources in reverse order:
 - Environment variable handling
 - Multi-file API specification copying
 
+✅ **Custom Selection Provisioning**
+- Choose specific asset types (Collections, Environments, Mocks, Specs)
+- Select individual items from each category
+- Build custom workflows for your specific needs
+
 ✅ **Safe Reset Functionality**
 - Dependency-aware deletion order
 - Confirmation prompts (CLI only)
+- Selective deletion options
 - Detailed error reporting
 
 ✅ **Flexible Configuration**
@@ -81,7 +92,7 @@ npm install
 
 ## Version 1: CLI Scripts
 
-Command-line tools for interactive workspace management.
+Command-line tools for interactive workspace management. Best for manual operations and testing.
 
 ### CLI Setup
 
@@ -234,33 +245,66 @@ VITE_POSTMAN_TARGET_WORKSPACE_ID=your_target_workspace_id (optional)
 
 ```javascript
 import {
+  // Copy All Functions
   provisionWorkspace,
   resetWorkspace,
+  
+  // Custom Selection Functions
+  provisionCustomWorkspace,
+  resetCustomWorkspace,
+  
+  // Helper Functions
+  getAvailableCollections,
+  getAvailableResources,
   validateApiKey,
   getWorkspace,
+  getWorkspaceSummary,
 } from './postmanService.js';
 ```
 
-### Web Usage
+---
 
-#### Provisioning a Workspace
+### Available Functions
+
+The web library provides two categories of functions:
+
+| Category | Function | Purpose |
+|----------|----------|---------|
+| **Copy All** | `provisionWorkspace()` | Copy ALL assets from source workspace |
+| **Copy All** | `resetWorkspace()` | Delete ALL assets in target workspace |
+| **Custom** | `provisionCustomWorkspace()` | Select specific asset types and items |
+| **Custom** | `resetCustomWorkspace()` | Delete specific asset types and items |
+| **Helper** | `getAvailableCollections()` | Get collections for UI checklist |
+| **Helper** | `getAvailableResources()` | Get all resources for UI selection |
+
+---
+
+### Copy All Functions
+
+These functions copy or delete ALL assets without selection. Simple, one-call operations.
+
+#### `provisionWorkspace()` - Copy All Assets
+
+Copies all collections, creates mocks, copies environments, and copies specs automatically.
 
 ```javascript
-// Basic example - create new workspace
+import { provisionWorkspace } from './postmanService.js';
+
+// Create new workspace with all assets
 const results = await provisionWorkspace({
   sourceWorkspaceId: 'source-workspace-id',
   workspaceName: 'My Partner Workspace',
-  workspaceType: 'partner'
+  workspaceType: 'partner'  // 'partner' | 'team' | 'private'
 }, (progress) => {
   console.log(`${progress.phase}: ${progress.message}`);
   console.log(`Progress: ${progress.progress}%`);
 });
 
-console.log('Provisioning complete!', results);
+console.log('Results:', results);
 ```
 
 ```javascript
-// Use existing workspace
+// Use existing target workspace
 const results = await provisionWorkspace({
   sourceWorkspaceId: 'source-workspace-id',
   targetWorkspaceId: 'existing-target-workspace-id',
@@ -269,44 +313,28 @@ const results = await provisionWorkspace({
 });
 ```
 
+**Returns:**
 ```javascript
-// With React component
-function WorkspaceProvisioner() {
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('');
-  const [results, setResults] = useState(null);
-
-  const handleProvision = async () => {
-    try {
-      const result = await provisionWorkspace({
-        sourceWorkspaceId: 'abc-123',
-        workspaceName: 'New Workspace',
-      }, (progressData) => {
-        setProgress(progressData.progress);
-        setStatus(progressData.message);
-      });
-      
-      setResults(result);
-    } catch (error) {
-      console.error('Provisioning failed:', error);
-    }
-  };
-
-  return (
-    <div>
-      <button onClick={handleProvision}>Provision Workspace</button>
-      <div>Status: {status}</div>
-      <div>Progress: {progress}%</div>
-      {results && <pre>{JSON.stringify(results, null, 2)}</pre>}
-    </div>
-  );
+{
+  workspace: { id, name, type },
+  workspaceCreated: boolean,
+  collections: { total, success, failed, successData },
+  mocks: { total, success, failed, urls },
+  environments: { total, success, failed, successData },
+  mockEnv: { success, action: 'created' | 'updated' },
+  specs: { total, success, failed, successData },
+  errors: []
 }
 ```
 
-#### Resetting a Workspace
+#### `resetWorkspace()` - Delete All Assets
+
+Deletes all resources in reverse dependency order.
 
 ```javascript
-// Reset entire workspace
+import { resetWorkspace } from './postmanService.js';
+
+// Delete ALL resources
 const results = await resetWorkspace(
   'workspace-id-to-reset',
   (progress) => {
@@ -319,7 +347,7 @@ console.log('Reset complete!', results);
 ```
 
 ```javascript
-// Partial reset - only delete specific resources
+// Partial reset - choose asset types
 const results = await resetWorkspace(
   'workspace-id',
   (progress) => console.log(progress),
@@ -330,132 +358,6 @@ const results = await resetWorkspace(
     includeCollections: false,   // Keep collections
   }
 );
-```
-
-```javascript
-// With React component
-function WorkspaceResetter() {
-  const [status, setStatus] = useState('');
-  const [results, setResults] = useState(null);
-
-  const handleReset = async () => {
-    if (!confirm('Are you sure? This will delete all resources!')) {
-      return;
-    }
-
-    try {
-      const result = await resetWorkspace(
-        'workspace-id',
-        (progressData) => {
-          setStatus(progressData.message);
-        }
-      );
-      
-      setResults(result);
-    } catch (error) {
-      console.error('Reset failed:', error);
-    }
-  };
-
-  return (
-    <div>
-      <button onClick={handleReset}>Reset Workspace</button>
-      <div>Status: {status}</div>
-      {results && <pre>{JSON.stringify(results, null, 2)}</pre>}
-    </div>
-  );
-}
-```
-
-### Web API Reference
-
-#### `provisionWorkspace(options, onProgress)`
-
-Provisions a complete workspace with all resources.
-
-**Parameters:**
-```javascript
-{
-  sourceWorkspaceId: string,        // Required: Source workspace ID
-  targetWorkspaceId?: string,       // Optional: Existing target workspace
-  workspaceName?: string,           // Required if creating new workspace
-  workspaceType?: string,           // Optional: 'partner' | 'team' | 'private' (default: 'partner')
-}
-```
-
-**Progress Callback:**
-```javascript
-(progress) => {
-  progress.phase      // Current phase: 'validation' | 'workspace' | 'collections' | 'mocks' | 'environments' | 'mockEnv' | 'specs' | 'complete' | 'error'
-  progress.message    // Human-readable status message
-  progress.progress   // Overall progress percentage (0-100)
-  progress.current    // Current item number (for lists)
-  progress.total      // Total items (for lists)
-}
-```
-
-**Returns:**
-```javascript
-{
-  workspace: object,           // Workspace details
-  workspaceCreated: boolean,   // True if new workspace was created
-  collections: {
-    total: number,
-    success: number,
-    failed: array,
-    successData: array
-  },
-  mocks: {
-    total: number,
-    success: number,
-    failed: array,
-    urls: array              // Mock server URLs
-  },
-  environments: {
-    total: number,
-    success: number,
-    failed: array,
-    successData: array
-  },
-  mockEnv: {
-    success: boolean,
-    action: 'created' | 'updated' | null
-  },
-  specs: {
-    total: number,
-    success: number,
-    failed: array,
-    successData: array
-  },
-  errors: array              // All errors encountered
-}
-```
-
-#### `resetWorkspace(workspaceId, onProgress, options)`
-
-Resets a workspace by deleting all resources.
-
-**Parameters:**
-```javascript
-workspaceId: string                 // Required: Workspace ID to reset
-onProgress: function                // Progress callback
-options: {
-  includeSpecs?: boolean,          // Default: true
-  includeMocks?: boolean,          // Default: true
-  includeEnvironments?: boolean,   // Default: true
-  includeCollections?: boolean,    // Default: true
-}
-```
-
-**Progress Callback:**
-```javascript
-(progress) => {
-  progress.phase      // Current phase: 'specs' | 'mocks' | 'environments' | 'collections' | 'complete' | 'error'
-  progress.message    // Human-readable status message
-  progress.deleted    // Number of items deleted
-  progress.total      // Total items to delete
-  progress.currentItem // Name of current item being deleted
-}
 ```
 
 **Returns:**
@@ -469,11 +371,309 @@ options: {
   totalMocks: number,
   totalEnvironments: number,
   totalCollections: number,
-  errors: array
+  errors: []
 }
 ```
 
-#### Utility Functions
+---
+
+### Custom Selection Functions
+
+These functions allow you to choose which asset types to copy/delete AND select specific items.
+
+#### `provisionCustomWorkspace()` - Selective Provisioning
+
+Copy specific asset types and/or specific items within each type.
+
+**Example 1: Copy Only Collections and Environments (Skip Mocks & Specs)**
+
+```javascript
+import { provisionCustomWorkspace } from './postmanService.js';
+
+const results = await provisionCustomWorkspace({
+  sourceWorkspaceId: 'source-workspace-id',
+  targetWorkspaceId: 'target-workspace-id',
+  copyCollections: true,      // ✅ Copy collections
+  copyEnvironments: true,     // ✅ Copy environments
+  copyMocks: false,           // ❌ Skip mocks
+  copySpecs: false,           // ❌ Skip specs
+}, (progress) => {
+  console.log(`${progress.phase}: ${progress.message}`);
+});
+```
+
+**Example 2: Copy Specific Collections Only**
+
+```javascript
+import { getAvailableCollections, provisionCustomWorkspace } from './postmanService.js';
+
+// Step 1: Get available collections (for UI checklist)
+const availableCollections = await getAvailableCollections('source-workspace-id');
+console.log(availableCollections);
+// [{ id, uid, name, selected: false, metadata: {...} }, ...]
+
+// Step 2: User selects specific collections (from UI)
+const selectedUids = [
+  availableCollections[0].uid,  // First collection
+  availableCollections[2].uid,  // Third collection
+];
+
+// Step 3: Provision only selected collections
+const results = await provisionCustomWorkspace({
+  sourceWorkspaceId: 'source-workspace-id',
+  targetWorkspaceId: 'target-workspace-id',
+  copyCollections: true,
+  copyMocks: true,                           // Create mocks for selected collections
+  copyEnvironments: false,
+  copySpecs: false,
+  selectedCollectionUids: selectedUids,      // ⭐ Only copy these collections
+}, (progress) => {
+  console.log(progress);
+});
+```
+
+**Example 3: Copy Collections + Specific Environments**
+
+```javascript
+import { getAvailableResources, provisionCustomWorkspace } from './postmanService.js';
+
+// Get all available resources
+const resources = await getAvailableResources('source-workspace-id');
+
+// Select specific items
+const selectedCollections = resources.collections
+  .filter(c => c.name.includes('Authentication'))
+  .map(c => c.uid);
+
+const selectedEnvironments = resources.environments
+  .filter(e => e.name.includes('Test'))
+  .map(e => e.uid);
+
+// Provision with selections
+const results = await provisionCustomWorkspace({
+  sourceWorkspaceId: 'source-workspace-id',
+  workspaceName: 'Custom Workspace',  // Create new workspace
+  copyCollections: true,
+  copyEnvironments: true,
+  copyMocks: true,
+  copySpecs: false,
+  selectedCollectionUids: selectedCollections,
+  selectedEnvironmentUids: selectedEnvironments,
+  createMockEnv: true,
+}, (progress) => {
+  console.log(`Progress: ${progress.progress}%`);
+});
+```
+
+**Example 4: Copy Everything Except Specs**
+
+```javascript
+const results = await provisionCustomWorkspace({
+  sourceWorkspaceId: 'source-workspace-id',
+  targetWorkspaceId: 'target-workspace-id',
+  copyCollections: true,
+  copyEnvironments: true,
+  copyMocks: true,
+  copySpecs: false,  // ❌ Skip specs only
+  createMockEnv: true,
+}, (progress) => console.log(progress.message));
+```
+
+**Example 5: Copy Only Specs**
+
+```javascript
+const results = await provisionCustomWorkspace({
+  sourceWorkspaceId: 'source-workspace-id',
+  targetWorkspaceId: 'target-workspace-id',
+  copyCollections: false,
+  copyEnvironments: false,
+  copyMocks: false,
+  copySpecs: true,  // ✅ Only copy specs
+}, (progress) => console.log(progress));
+```
+
+**Full Options:**
+```javascript
+{
+  sourceWorkspaceId: string,        // Required: Source workspace ID
+  targetWorkspaceId?: string,       // Optional: Existing target workspace
+  workspaceName?: string,           // Required if creating new workspace
+  workspaceType?: string,           // 'partner' | 'team' | 'private'
+  copyCollections?: boolean,        // Default: true
+  copyEnvironments?: boolean,       // Default: true
+  copyMocks?: boolean,              // Default: true
+  copySpecs?: boolean,              // Default: true
+  selectedCollectionUids?: string[], // Specific collection UIDs to copy
+  selectedEnvironmentUids?: string[], // Specific environment UIDs to copy
+  selectedSpecIds?: string[],       // Specific spec IDs to copy
+  createMockEnv?: boolean,          // Create/update Mock Env (default: true)
+}
+```
+
+#### `resetCustomWorkspace()` - Selective Reset
+
+Delete specific asset types and/or specific items within each type.
+
+**Example 1: Delete Only Mocks and Specs (Keep Collections & Environments)**
+
+```javascript
+import { resetCustomWorkspace } from './postmanService.js';
+
+const results = await resetCustomWorkspace(
+  'workspace-id',
+  (progress) => {
+    console.log(`${progress.phase}: ${progress.deleted}/${progress.total}`);
+  },
+  {
+    includeSpecs: true,         // ✅ Delete specs
+    includeMocks: true,         // ✅ Delete mocks
+    includeEnvironments: false, // ❌ Keep environments
+    includeCollections: false,  // ❌ Keep collections
+  }
+);
+
+console.log('Deleted:', results);
+```
+
+**Example 2: Delete Specific Collections Only**
+
+```javascript
+import { getAvailableCollections, resetCustomWorkspace } from './postmanService.js';
+
+// Get collections in target workspace
+const collections = await getAvailableCollections('target-workspace-id');
+
+// Select specific collections to delete
+const collectionsToDelete = collections
+  .filter(c => c.name.includes('Old') || c.name.includes('Test'))
+  .map(c => c.uid);
+
+// Delete only selected collections
+const results = await resetCustomWorkspace(
+  'workspace-id',
+  (progress) => console.log(progress),
+  {
+    includeCollections: true,
+    includeEnvironments: false,
+    includeMocks: false,
+    includeSpecs: false,
+    selectedCollectionUids: collectionsToDelete,  // ⭐ Only delete these
+  }
+);
+```
+
+**Example 3: Delete Test Environments Only**
+
+```javascript
+import { getAvailableResources, resetCustomWorkspace } from './postmanService.js';
+
+const resources = await getAvailableResources('workspace-id');
+
+// Select test environments to delete
+const testEnvUids = resources.environments
+  .filter(e => e.name.includes('Test'))
+  .map(e => e.uid);
+
+const results = await resetCustomWorkspace(
+  'workspace-id',
+  (progress) => console.log(progress),
+  {
+    includeEnvironments: true,
+    selectedEnvironmentUids: testEnvUids,  // Only delete test environments
+    includeCollections: false,
+    includeMocks: false,
+    includeSpecs: false,
+  }
+);
+```
+
+**Example 4: Clean Up Everything Except Production Collection**
+
+```javascript
+const allCollections = await getAvailableCollections('workspace-id');
+
+// Keep only the production collection
+const collectionsToDelete = allCollections
+  .filter(c => c.name !== 'Production Collection')
+  .map(c => c.uid);
+
+const results = await resetCustomWorkspace(
+  'workspace-id',
+  (progress) => console.log(progress),
+  {
+    includeSpecs: true,
+    includeMocks: true,
+    includeEnvironments: true,
+    includeCollections: true,
+    selectedCollectionUids: collectionsToDelete,  // Delete all except production
+  }
+);
+```
+
+**Full Options:**
+```javascript
+{
+  includeSpecs?: boolean,           // Default: true
+  includeMocks?: boolean,           // Default: true
+  includeEnvironments?: boolean,    // Default: true
+  includeCollections?: boolean,     // Default: true
+  selectedCollectionUids?: string[], // Specific collections to delete
+  selectedEnvironmentUids?: string[], // Specific environments to delete
+  selectedMockIds?: string[],       // Specific mocks to delete
+  selectedSpecIds?: string[],       // Specific specs to delete
+}
+```
+
+---
+
+### Helper Functions
+
+Functions to retrieve resources for building selection UIs.
+
+#### `getAvailableCollections(workspaceId)`
+
+Returns collections formatted for checkbox/checklist UI.
+
+```javascript
+import { getAvailableCollections } from './postmanService.js';
+
+const collections = await getAvailableCollections('source-workspace-id');
+
+console.log(collections);
+// [
+//   {
+//     id: '12345',
+//     uid: '12345678-abc-def',
+//     name: 'Authentication Services',
+//     selected: false,  // Default selection state for UI
+//     metadata: {
+//       createdAt: '2024-01-01T00:00:00Z',
+//       updatedAt: '2024-01-15T00:00:00Z'
+//     }
+//   },
+//   ...
+// ]
+```
+
+#### `getAvailableResources(workspaceId)`
+
+Returns ALL resource types at once for comprehensive UIs.
+
+```javascript
+import { getAvailableResources } from './postmanService.js';
+
+const resources = await getAvailableResources('source-workspace-id');
+
+console.log(resources);
+// {
+//   collections: [{ id, uid, name, selected: false }, ...],
+//   environments: [{ id, uid, name, selected: false }, ...],
+//   mocks: [{ id, uid, name, selected: false, collectionUid }, ...],
+//   specs: [{ id, name, type, selected: false }, ...]
+// }
+```
+
+#### Other Utility Functions
 
 ```javascript
 // Validate API key
@@ -489,6 +689,460 @@ const summary = await getWorkspaceSummary(workspaceId);
 // Check configuration
 const status = getConfigurationStatus();
 // Returns: { hasApiKey, hasSourceWorkspace, hasTargetWorkspace, isConfigured, message }
+```
+
+---
+
+### React Integration Examples
+
+#### Simple "Copy All" Button
+
+```javascript
+import React, { useState } from 'react';
+import { provisionWorkspace } from './postmanService';
+
+function SimpleProvisioner() {
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState('');
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleProvision = async () => {
+    setLoading(true);
+    try {
+      const result = await provisionWorkspace({
+        sourceWorkspaceId: 'source-workspace-id',
+        workspaceName: 'New Workspace',
+      }, (progressData) => {
+        setProgress(progressData.progress);
+        setStatus(progressData.message);
+      });
+      
+      setResults(result);
+    } catch (error) {
+      console.error('Provisioning failed:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2>Quick Provision</h2>
+      <button onClick={handleProvision} disabled={loading}>
+        {loading ? 'Provisioning...' : 'Provision All Assets'}
+      </button>
+      
+      {loading && (
+        <div>
+          <div>Status: {status}</div>
+          <div>Progress: {progress}%</div>
+        </div>
+      )}
+      
+      {results && (
+        <div>
+          <h3>Results</h3>
+          <p>Collections: {results.collections.success}/{results.collections.total}</p>
+          <p>Mocks: {results.mocks.success}/{results.mocks.total}</p>
+          <p>Environments: {results.environments.success}/{results.environments.total}</p>
+          <p>Specs: {results.specs.success}/{results.specs.total}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default SimpleProvisioner;
+```
+
+#### Collection Selector with Checklist
+
+```javascript
+import React, { useState, useEffect } from 'react';
+import {
+  getAvailableCollections,
+  provisionCustomWorkspace
+} from './postmanService';
+
+function CollectionSelector() {
+  const [collections, setCollections] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState('');
+
+  // Load available collections
+  useEffect(() => {
+    const loadCollections = async () => {
+      const data = await getAvailableCollections('source-workspace-id');
+      setCollections(data);
+    };
+    loadCollections();
+  }, []);
+
+  // Toggle collection selection
+  const toggleCollection = (uid) => {
+    setSelected(prev =>
+      prev.includes(uid)
+        ? prev.filter(id => id !== uid)
+        : [...prev, uid]
+    );
+  };
+
+  // Select/Deselect all
+  const toggleAll = () => {
+    if (selected.length === collections.length) {
+      setSelected([]);
+    } else {
+      setSelected(collections.map(c => c.uid));
+    }
+  };
+
+  // Provision selected collections
+  const handleProvision = async () => {
+    if (selected.length === 0) {
+      alert('Please select at least one collection');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const results = await provisionCustomWorkspace({
+        sourceWorkspaceId: 'source-workspace-id',
+        targetWorkspaceId: 'target-workspace-id',
+        copyCollections: true,
+        copyMocks: true,
+        copyEnvironments: false,
+        copySpecs: false,
+        selectedCollectionUids: selected,
+        createMockEnv: true,
+      }, (progressData) => {
+        setProgress(progressData.progress);
+        setStatus(progressData.message);
+      });
+
+      alert(`Success! Copied ${results.collections.success} collections`);
+    } catch (error) {
+      alert(`Error: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2>Select Collections to Copy</h2>
+      
+      {/* Select All Button */}
+      <div style={{ marginBottom: '20px' }}>
+        <button onClick={toggleAll}>
+          {selected.length === collections.length ? 'Deselect All' : 'Select All'}
+        </button>
+        <span style={{ marginLeft: '10px' }}>
+          {selected.length} of {collections.length} selected
+        </span>
+      </div>
+
+      {/* Collection Checklist */}
+      <div style={{ maxHeight: '400px', overflow: 'auto', border: '1px solid #ccc', padding: '10px' }}>
+        {collections.map(collection => (
+          <div key={collection.uid} style={{ marginBottom: '10px' }}>
+            <label>
+              <input
+                type="checkbox"
+                checked={selected.includes(collection.uid)}
+                onChange={() => toggleCollection(collection.uid)}
+              />
+              <span style={{ marginLeft: '8px' }}>{collection.name}</span>
+            </label>
+          </div>
+        ))}
+      </div>
+
+      {/* Provision Button */}
+      <div style={{ marginTop: '20px' }}>
+        <button
+          onClick={handleProvision}
+          disabled={loading || selected.length === 0}
+          style={{ padding: '10px 20px', fontSize: '16px' }}
+        >
+          {loading ? 'Provisioning...' : 'Provision Selected Collections'}
+        </button>
+      </div>
+
+      {/* Progress Display */}
+      {loading && (
+        <div style={{ marginTop: '20px' }}>
+          <div>Status: {status}</div>
+          <div style={{ 
+            width: '100%', 
+            backgroundColor: '#f0f0f0', 
+            height: '20px', 
+            borderRadius: '10px' 
+          }}>
+            <div style={{
+              width: `${progress}%`,
+              backgroundColor: '#4CAF50',
+              height: '100%',
+              borderRadius: '10px',
+              transition: 'width 0.3s'
+            }} />
+          </div>
+          <div style={{ textAlign: 'center' }}>{progress}%</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default CollectionSelector;
+```
+
+#### Multi-Resource Selector (All Asset Types)
+
+```javascript
+import React, { useState, useEffect } from 'react';
+import {
+  getAvailableResources,
+  provisionCustomWorkspace
+} from './postmanService';
+
+function MultiResourceSelector() {
+  const [resources, setResources] = useState({
+    collections: [],
+    environments: [],
+    specs: []
+  });
+  
+  const [selected, setSelected] = useState({
+    collections: [],
+    environments: [],
+    specs: []
+  });
+
+  const [options, setOptions] = useState({
+    copyCollections: true,
+    copyEnvironments: true,
+    copyMocks: true,
+    copySpecs: true,
+  });
+
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const loadResources = async () => {
+      const data = await getAvailableResources('source-workspace-id');
+      setResources(data);
+    };
+    loadResources();
+  }, []);
+
+  const toggleItem = (type, id) => {
+    setSelected(prev => ({
+      ...prev,
+      [type]: prev[type].includes(id)
+        ? prev[type].filter(item => item !== id)
+        : [...prev[type], id]
+    }));
+  };
+
+  const handleProvision = async () => {
+    setLoading(true);
+    try {
+      await provisionCustomWorkspace({
+        sourceWorkspaceId: 'source-workspace-id',
+        targetWorkspaceId: 'target-workspace-id',
+        ...options,
+        selectedCollectionUids: selected.collections.length > 0 ? selected.collections : null,
+        selectedEnvironmentUids: selected.environments.length > 0 ? selected.environments : null,
+        selectedSpecIds: selected.specs.length > 0 ? selected.specs : null,
+      }, (progress) => {
+        console.log(progress);
+      });
+      alert('Provisioning complete!');
+    } catch (error) {
+      alert(`Error: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2>Custom Workspace Provisioning</h2>
+
+      {/* Asset Type Toggles */}
+      <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#f5f5f5' }}>
+        <h3>Select Asset Types to Copy</h3>
+        <label style={{ marginRight: '20px' }}>
+          <input
+            type="checkbox"
+            checked={options.copyCollections}
+            onChange={(e) => setOptions({...options, copyCollections: e.target.checked})}
+          />
+          Collections
+        </label>
+        <label style={{ marginRight: '20px' }}>
+          <input
+            type="checkbox"
+            checked={options.copyEnvironments}
+            onChange={(e) => setOptions({...options, copyEnvironments: e.target.checked})}
+          />
+          Environments
+        </label>
+        <label style={{ marginRight: '20px' }}>
+          <input
+            type="checkbox"
+            checked={options.copyMocks}
+            onChange={(e) => setOptions({...options, copyMocks: e.target.checked})}
+          />
+          Mock Servers
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={options.copySpecs}
+            onChange={(e) => setOptions({...options, copySpecs: e.target.checked})}
+          />
+          API Specs
+        </label>
+      </div>
+
+      {/* Resource Selection Lists */}
+      <div style={{ display: 'flex', gap: '20px' }}>
+        {/* Collections */}
+        {options.copyCollections && (
+          <div style={{ flex: 1 }}>
+            <h4>Collections ({selected.collections.length} selected)</h4>
+            <div style={{ maxHeight: '200px', overflow: 'auto', border: '1px solid #ddd', padding: '10px' }}>
+              {resources.collections.map(c => (
+                <div key={c.uid}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selected.collections.includes(c.uid)}
+                      onChange={() => toggleItem('collections', c.uid)}
+                    />
+                    {c.name}
+                  </label>
+                </div>
+              ))}
+            </div>
+            <small>Leave unchecked to copy all</small>
+          </div>
+        )}
+
+        {/* Environments */}
+        {options.copyEnvironments && (
+          <div style={{ flex: 1 }}>
+            <h4>Environments ({selected.environments.length} selected)</h4>
+            <div style={{ maxHeight: '200px', overflow: 'auto', border: '1px solid #ddd', padding: '10px' }}>
+              {resources.environments.map(e => (
+                <div key={e.uid}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selected.environments.includes(e.uid)}
+                      onChange={() => toggleItem('environments', e.uid)}
+                    />
+                    {e.name}
+                  </label>
+                </div>
+              ))}
+            </div>
+            <small>Leave unchecked to copy all</small>
+          </div>
+        )}
+
+        {/* Specs */}
+        {options.copySpecs && (
+          <div style={{ flex: 1 }}>
+            <h4>API Specs ({selected.specs.length} selected)</h4>
+            <div style={{ maxHeight: '200px', overflow: 'auto', border: '1px solid #ddd', padding: '10px' }}>
+              {resources.specs.map(s => (
+                <div key={s.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selected.specs.includes(s.id)}
+                      onChange={() => toggleItem('specs', s.id)}
+                    />
+                    {s.name} ({s.type})
+                  </label>
+                </div>
+              ))}
+            </div>
+            <small>Leave unchecked to copy all</small>
+          </div>
+        )}
+      </div>
+
+      <button 
+        onClick={handleProvision} 
+        disabled={loading}
+        style={{ marginTop: '20px', padding: '10px 30px', fontSize: '16px' }}
+      >
+        {loading ? 'Provisioning...' : 'Provision Workspace'}
+      </button>
+    </div>
+  );
+}
+
+export default MultiResourceSelector;
+```
+
+---
+
+## API Reference
+
+### Function Comparison Table
+
+| Function | Copies | Selectable | Use Case |
+|----------|--------|------------|----------|
+| `provisionWorkspace()` | ALL assets | Asset types only | Quick full copy |
+| `provisionCustomWorkspace()` | Selected assets | Types + Individual items | Custom workflows |
+| `resetWorkspace()` | ALL assets | Asset types only | Full workspace reset |
+| `resetCustomWorkspace()` | Selected assets | Types + Individual items | Targeted cleanup |
+
+### Progress Callback
+
+All functions accept a progress callback:
+
+```javascript
+(progress) => {
+  progress.phase      // Current phase: 'validation' | 'workspace' | 'collections' | 'mocks' | 'environments' | 'mockEnv' | 'specs' | 'complete' | 'error'
+  progress.message    // Human-readable status message
+  progress.progress   // Overall progress percentage (0-100)
+  progress.current    // Current item number (for lists)
+  progress.total      // Total items (for lists)
+  progress.currentItem // Name of current item
+  progress.deleted    // Number deleted (reset operations)
+}
+```
+
+### Error Handling
+
+```javascript
+try {
+  const results = await provisionCustomWorkspace({
+    sourceWorkspaceId: 'source-id',
+    targetWorkspaceId: 'target-id',
+    copyCollections: true,
+    selectedCollectionUids: ['uid1', 'uid2'],
+  }, (progress) => console.log(progress));
+
+  // Check for partial failures
+  if (results.errors.length > 0) {
+    console.warn('Some operations failed:', results.errors);
+  }
+
+  // Check success counts
+  console.log(`Copied ${results.collections.success}/${results.collections.total} collections`);
+  
+} catch (error) {
+  console.error('Provisioning failed:', error.message);
+}
 ```
 
 ---
@@ -572,11 +1226,11 @@ DEBUG=true npm run provision
 ```
 fde-pw-creation-script/
 ├── provision.js         # CLI provisioning script
-├── reset.js            # CLI reset script
-├── postmanService.js   # Web library module
-├── package.json        # Dependencies and scripts
-├── .env               # Configuration (create this)
-└── README.md          # This file
+├── reset.js             # CLI reset script
+├── postmanService.js    # Web library module
+├── package.json         # Dependencies and scripts
+├── .env                 # Configuration (create this)
+└── README.md            # This file
 ```
 
 ---

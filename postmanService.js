@@ -1573,3 +1573,679 @@ export const getWorkspaceSummary = async (workspaceId) => {
   };
 };
 
+// ============================================================================
+// CUSTOM PROVISIONING & RESET
+// ============================================================================
+
+/**
+ * Get available collections from a workspace for UI selection
+ * Returns collection data formatted for checkbox/checklist UI
+ * 
+ * @param {string} workspaceId - Source workspace ID
+ * @returns {Promise<Array>} Array of collection objects with selection metadata
+ */
+export const getAvailableCollections = async (workspaceId) => {
+  try {
+    const collections = await getAllCollections(workspaceId);
+    
+    return collections.map(collection => ({
+      id: collection.id,
+      uid: collection.uid,
+      name: collection.name,
+      selected: false, // Default selection state for UI
+      metadata: {
+        createdAt: collection.createdAt,
+        updatedAt: collection.updatedAt,
+      },
+    }));
+  } catch (error) {
+    console.error('Error getting available collections:', error);
+    return [];
+  }
+};
+
+/**
+ * Get available resources from a workspace for UI selection
+ * Returns all resource types formatted for checkbox/checklist UI
+ * 
+ * @param {string} workspaceId - Source workspace ID
+ * @returns {Promise<object>} Object with arrays of each resource type
+ */
+export const getAvailableResources = async (workspaceId) => {
+  try {
+    const [collections, environments, mocks, specs] = await Promise.all([
+      getAllCollections(workspaceId),
+      getAllEnvironments(workspaceId),
+      getAllMocks(workspaceId),
+      getAllSpecs(workspaceId),
+    ]);
+    
+    return {
+      collections: collections.map(c => ({
+        id: c.id,
+        uid: c.uid,
+        name: c.name,
+        selected: false,
+      })),
+      environments: environments.map(e => ({
+        id: e.id,
+        uid: e.uid,
+        name: e.name,
+        selected: false,
+      })),
+      mocks: mocks.map(m => ({
+        id: m.id,
+        uid: m.uid,
+        name: m.name,
+        selected: false,
+        collectionUid: m.collection,
+      })),
+      specs: specs.map(s => ({
+        id: s.id,
+        name: s.name,
+        type: s.type,
+        selected: false,
+      })),
+    };
+  } catch (error) {
+    console.error('Error getting available resources:', error);
+    return {
+      collections: [],
+      environments: [],
+      mocks: [],
+      specs: [],
+    };
+  }
+};
+
+/**
+ * Custom Workspace Provisioning
+ * 
+ * Provision a workspace with selective resource copying.
+ * Allows you to choose which asset types to copy and optionally select specific items.
+ * 
+ * @param {object} options - Provisioning options
+ * @param {string} options.sourceWorkspaceId - Source workspace ID (required)
+ * @param {string} options.targetWorkspaceId - Target workspace ID (optional - creates new if not provided)
+ * @param {string} options.workspaceName - Name for new workspace (required if targetWorkspaceId not provided)
+ * @param {string} options.workspaceType - Workspace type: 'partner' | 'team' | 'private' (default: 'partner')
+ * @param {boolean} options.copyCollections - Copy collections (default: true)
+ * @param {boolean} options.copyEnvironments - Copy environments (default: true)
+ * @param {boolean} options.copyMocks - Create mock servers (default: true)
+ * @param {boolean} options.copySpecs - Copy API specs (default: true)
+ * @param {Array<string>} options.selectedCollectionUids - Specific collection UIDs to copy (optional)
+ * @param {Array<string>} options.selectedEnvironmentUids - Specific environment UIDs to copy (optional)
+ * @param {Array<string>} options.selectedSpecIds - Specific spec IDs to copy (optional)
+ * @param {boolean} options.createMockEnv - Create/update Mock Env with mock URLs (default: true)
+ * @param {function} onProgress - Progress callback
+ * @returns {Promise<object>} Provisioning results
+ */
+export const provisionCustomWorkspace = async (options, onProgress) => {
+  const {
+    sourceWorkspaceId,
+    targetWorkspaceId,
+    workspaceName = 'Partner Workspace',
+    workspaceType = 'partner',
+    copyCollections = true,
+    copyEnvironments = true,
+    copyMocks = true,
+    copySpecs = true,
+    selectedCollectionUids = null, // null = all collections
+    selectedEnvironmentUids = null, // null = all environments
+    selectedSpecIds = null, // null = all specs
+    createMockEnv = true,
+  } = options;
+
+  if (!POSTMAN_API_KEY) {
+    throw new Error('Postman API key not configured');
+  }
+
+  if (!sourceWorkspaceId) {
+    throw new Error('Source workspace ID is required');
+  }
+
+  const results = {
+    workspace: null,
+    workspaceCreated: false,
+    collections: { total: 0, success: 0, failed: [], successData: [] },
+    mocks: { total: 0, success: 0, failed: [], urls: [] },
+    environments: { total: 0, success: 0, failed: [], successData: [] },
+    mockEnv: { success: false, action: null },
+    specs: { total: 0, success: 0, failed: [], successData: [] },
+    errors: [],
+  };
+
+  try {
+    // Validation
+    onProgress?.({
+      phase: 'validation',
+      message: 'Validating configuration...',
+      progress: 5,
+    });
+
+    const validation = await validateApiKey();
+    if (!validation.valid) {
+      throw new Error(`Invalid API key: ${validation.error}`);
+    }
+
+    const sourceWorkspace = await getWorkspace(sourceWorkspaceId);
+    if (!sourceWorkspace) {
+      throw new Error(`Source workspace not found: ${sourceWorkspaceId}`);
+    }
+
+    // Initialize target workspace
+    onProgress?.({
+      phase: 'workspace',
+      message: targetWorkspaceId ? 'Using existing workspace...' : 'Creating new workspace...',
+      progress: 10,
+    });
+
+    let workspaceId = targetWorkspaceId;
+    
+    if (targetWorkspaceId) {
+      const existingWorkspace = await getWorkspace(targetWorkspaceId);
+      if (!existingWorkspace) {
+        throw new Error(`Target workspace not found: ${targetWorkspaceId}`);
+      }
+      results.workspace = existingWorkspace;
+      results.workspaceCreated = false;
+    } else {
+      if (!workspaceName) {
+        throw new Error('Workspace name is required when creating a new workspace');
+      }
+      
+      const createResult = await createWorkspace(workspaceName, workspaceType);
+      if (!createResult.success) {
+        throw new Error(`Failed to create workspace: ${createResult.error}`);
+      }
+      
+      workspaceId = createResult.workspace.id;
+      results.workspace = createResult.workspace;
+      results.workspaceCreated = true;
+    }
+
+    // Copy Collections (with optional filtering)
+    if (copyCollections) {
+      onProgress?.({
+        phase: 'collections',
+        message: 'Copying collections...',
+        progress: 20,
+      });
+
+      let sourceCollections = await getAllCollections(sourceWorkspaceId);
+      
+      // Filter by selected UIDs if provided
+      if (selectedCollectionUids && selectedCollectionUids.length > 0) {
+        sourceCollections = sourceCollections.filter(c => selectedCollectionUids.includes(c.uid));
+      }
+      
+      results.collections.total = sourceCollections.length;
+
+      const collectionMap = new Map();
+
+      for (let i = 0; i < sourceCollections.length; i++) {
+        const collection = sourceCollections[i];
+        
+        onProgress?.({
+          phase: 'collections',
+          message: `Forking: ${collection.name}`,
+          current: i + 1,
+          total: sourceCollections.length,
+          progress: 20 + (i / sourceCollections.length) * 15,
+        });
+
+        const forkResult = await forkCollection(collection.uid, collection.name, workspaceId);
+        
+        if (forkResult.success) {
+          results.collections.success++;
+          results.collections.successData.push({
+            name: forkResult.collectionName,
+            uid: forkResult.uid,
+          });
+          collectionMap.set(collection.uid, forkResult.uid);
+        } else {
+          results.collections.failed.push({
+            name: collection.name,
+            error: forkResult.error,
+          });
+          results.errors.push(`Failed to fork ${collection.name}: ${forkResult.error}`);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      // Create Mock Servers (if enabled and collections were copied)
+      if (copyMocks && results.collections.successData.length > 0) {
+        onProgress?.({
+          phase: 'mocks',
+          message: 'Creating mock servers...',
+          progress: 40,
+        });
+
+        results.mocks.total = results.collections.successData.length;
+
+        for (let i = 0; i < results.collections.successData.length; i++) {
+          const collection = results.collections.successData[i];
+          const mockName = `${collection.name} Mock`;
+          
+          onProgress?.({
+            phase: 'mocks',
+            message: `Creating: ${mockName}`,
+            current: i + 1,
+            total: results.collections.successData.length,
+            progress: 40 + (i / results.collections.successData.length) * 15,
+          });
+
+          const mockResult = await createMockServer(mockName, collection.uid, workspaceId, null);
+          
+          if (mockResult.success) {
+            results.mocks.success++;
+            results.mocks.urls.push({
+              collectionName: collection.name,
+              mockName: mockResult.mockName,
+              mockUrl: mockResult.mockUrl,
+            });
+          } else {
+            results.mocks.failed.push({
+              name: mockName,
+              error: mockResult.error,
+            });
+            results.errors.push(`Failed to create mock ${mockName}: ${mockResult.error}`);
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
+    }
+
+    // Copy Environments (with optional filtering)
+    if (copyEnvironments) {
+      onProgress?.({
+        phase: 'environments',
+        message: 'Copying environments...',
+        progress: 60,
+      });
+
+      let sourceEnvironments = await getAllEnvironments(sourceWorkspaceId);
+      
+      // Filter by selected UIDs if provided
+      if (selectedEnvironmentUids && selectedEnvironmentUids.length > 0) {
+        sourceEnvironments = sourceEnvironments.filter(e => selectedEnvironmentUids.includes(e.uid));
+      }
+      
+      results.environments.total = sourceEnvironments.length;
+
+      const envMap = new Map();
+
+      for (let i = 0; i < sourceEnvironments.length; i++) {
+        const env = sourceEnvironments[i];
+        
+        onProgress?.({
+          phase: 'environments',
+          message: `Copying: ${env.name}`,
+          current: i + 1,
+          total: sourceEnvironments.length,
+          progress: 60 + (i / sourceEnvironments.length) * 10,
+        });
+
+        const envDetails = await getEnvironmentDetails(env.uid);
+        if (!envDetails) {
+          results.environments.failed.push({
+            name: env.name,
+            error: 'Could not get environment details',
+          });
+          continue;
+        }
+
+        const createResult = await createEnvironmentInPostman(envDetails.name, envDetails.values || [], workspaceId);
+        
+        if (createResult.success) {
+          results.environments.success++;
+          results.environments.successData.push({
+            name: createResult.environmentName,
+            uid: createResult.uid,
+          });
+          envMap.set(env.uid, { targetUid: createResult.uid, name: envDetails.name });
+        } else {
+          results.environments.failed.push({
+            name: envDetails.name,
+            error: createResult.error,
+          });
+          results.errors.push(`Failed to copy ${envDetails.name}: ${createResult.error}`);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      // Update/Create Mock Env (if enabled and mocks were created)
+      if (createMockEnv && results.mocks.urls.length > 0) {
+        onProgress?.({
+          phase: 'mockEnv',
+          message: 'Updating Mock Environment...',
+          progress: 75,
+        });
+
+        const mockVariables = results.mocks.urls.map((mock, index) => ({
+          key: `mock_url_${index + 1}`,
+          value: mock.mockUrl,
+          type: 'default',
+          enabled: true,
+          description: `Mock server URL for ${mock.collectionName}`,
+        }));
+
+        // Find existing Mock Env
+        let mockEnv = null;
+        for (const [, envData] of envMap) {
+          const normalizedName = envData.name.toLowerCase();
+          if (MOCK_ENV_NAMES.some(name => normalizedName === name.toLowerCase())) {
+            mockEnv = envData;
+            break;
+          }
+        }
+
+        if (mockEnv) {
+          const envDetails = await getEnvironmentDetails(mockEnv.targetUid);
+          const existingValues = envDetails?.values || [];
+          const mergedValues = [...existingValues, ...mockVariables];
+          
+          const updateResult = await updateEnvironment(mockEnv.targetUid, mockEnv.name, mergedValues);
+          
+          if (updateResult.success) {
+            results.mockEnv.success = true;
+            results.mockEnv.action = 'updated';
+          } else {
+            results.errors.push(`Failed to update Mock Env: ${updateResult.error}`);
+          }
+        } else {
+          const createResult = await createEnvironmentInPostman('Mock Env', mockVariables, workspaceId);
+          
+          if (createResult.success) {
+            results.mockEnv.success = true;
+            results.mockEnv.action = 'created';
+          } else {
+            results.errors.push(`Failed to create Mock Env: ${createResult.error}`);
+          }
+        }
+      }
+    }
+
+    // Copy Specs (with optional filtering)
+    if (copySpecs) {
+      onProgress?.({
+        phase: 'specs',
+        message: 'Copying specs...',
+        progress: 80,
+      });
+
+      let sourceSpecs = await getAllSpecs(sourceWorkspaceId);
+      
+      // Filter by selected IDs if provided
+      if (selectedSpecIds && selectedSpecIds.length > 0) {
+        sourceSpecs = sourceSpecs.filter(s => selectedSpecIds.includes(s.id));
+      }
+      
+      results.specs.total = sourceSpecs.length;
+
+      for (let i = 0; i < sourceSpecs.length; i++) {
+        const spec = sourceSpecs[i];
+        
+        onProgress?.({
+          phase: 'specs',
+          message: `Copying: ${spec.name}`,
+          current: i + 1,
+          total: sourceSpecs.length,
+          progress: 80 + (i / sourceSpecs.length) * 15,
+        });
+
+        const copyResult = await copySpec(spec.id, spec.name, spec.type, workspaceId);
+        
+        if (copyResult.success) {
+          results.specs.success++;
+          results.specs.successData.push({
+            name: copyResult.specName,
+            id: copyResult.newSpecId,
+            filesCopied: copyResult.filesCopied,
+          });
+        } else {
+          results.specs.failed.push({
+            name: spec.name,
+            error: copyResult.errors.join('; '),
+          });
+          results.errors.push(`Failed to copy spec ${spec.name}`);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    // Complete
+    onProgress?.({
+      phase: 'complete',
+      message: 'Custom provisioning complete!',
+      progress: 100,
+      results,
+    });
+
+    return results;
+
+  } catch (error) {
+    results.errors.push(error.message);
+    onProgress?.({
+      phase: 'error',
+      message: `Error: ${error.message}`,
+      progress: 0,
+      results,
+    });
+    throw error;
+  }
+};
+
+/**
+ * Custom Workspace Reset
+ * 
+ * Reset a workspace with selective resource deletion.
+ * Allows you to choose which asset types to delete and optionally select specific items.
+ * 
+ * @param {string} workspaceId - Workspace ID to reset (required)
+ * @param {function} onProgress - Progress callback
+ * @param {object} options - Reset options
+ * @param {boolean} options.includeSpecs - Delete specs (default: true)
+ * @param {boolean} options.includeMocks - Delete mocks (default: true)
+ * @param {boolean} options.includeEnvironments - Delete environments (default: true)
+ * @param {boolean} options.includeCollections - Delete collections (default: true)
+ * @param {Array<string>} options.selectedCollectionUids - Specific collection UIDs to delete (optional)
+ * @param {Array<string>} options.selectedEnvironmentUids - Specific environment UIDs to delete (optional)
+ * @param {Array<string>} options.selectedMockIds - Specific mock IDs to delete (optional)
+ * @param {Array<string>} options.selectedSpecIds - Specific spec IDs to delete (optional)
+ * @returns {Promise<object>} Reset results
+ */
+export const resetCustomWorkspace = async (workspaceId, onProgress, options = {}) => {
+  const {
+    includeSpecs = true,
+    includeMocks = true,
+    includeEnvironments = true,
+    includeCollections = true,
+    selectedCollectionUids = null, // null = all collections
+    selectedEnvironmentUids = null, // null = all environments
+    selectedMockIds = null, // null = all mocks
+    selectedSpecIds = null, // null = all specs
+  } = options;
+
+  const result = {
+    deletedSpecs: 0,
+    deletedMocks: 0,
+    deletedEnvironments: 0,
+    deletedCollections: 0,
+    totalSpecs: 0,
+    totalMocks: 0,
+    totalEnvironments: 0,
+    totalCollections: 0,
+    errors: [],
+  };
+
+  try {
+    // STEP 1: Delete Specs
+    if (includeSpecs) {
+      let specs = await getAllSpecs(workspaceId);
+      
+      // Filter by selected IDs if provided
+      if (selectedSpecIds && selectedSpecIds.length > 0) {
+        specs = specs.filter(s => selectedSpecIds.includes(s.id));
+      }
+      
+      result.totalSpecs = specs.length;
+      
+      onProgress?.({
+        phase: 'specs',
+        message: `Deleting ${specs.length} spec(s)...`,
+        deleted: 0,
+        total: specs.length,
+      });
+
+      for (const spec of specs) {
+        const success = await deleteSpec(spec.id);
+        if (success) {
+          result.deletedSpecs++;
+        } else {
+          result.errors.push(`Failed to delete spec: ${spec.name}`);
+        }
+        
+        onProgress?.({
+          phase: 'specs',
+          deleted: result.deletedSpecs,
+          total: specs.length,
+          currentItem: spec.name,
+        });
+        
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+
+    // STEP 2: Delete Mocks
+    if (includeMocks) {
+      let mocks = await getAllMocks(workspaceId);
+      
+      // Filter by selected IDs if provided
+      if (selectedMockIds && selectedMockIds.length > 0) {
+        mocks = mocks.filter(m => selectedMockIds.includes(m.id));
+      }
+      
+      result.totalMocks = mocks.length;
+      
+      onProgress?.({
+        phase: 'mocks',
+        message: `Deleting ${mocks.length} mock server(s)...`,
+        deleted: 0,
+        total: mocks.length,
+      });
+
+      for (const mock of mocks) {
+        const success = await deleteMock(mock.id);
+        if (success) {
+          result.deletedMocks++;
+        } else {
+          result.errors.push(`Failed to delete mock: ${mock.name}`);
+        }
+        
+        onProgress?.({
+          phase: 'mocks',
+          deleted: result.deletedMocks,
+          total: mocks.length,
+          currentItem: mock.name,
+        });
+        
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+
+    // STEP 3: Delete Environments
+    if (includeEnvironments) {
+      let environments = await getAllEnvironments(workspaceId);
+      
+      // Filter by selected UIDs if provided
+      if (selectedEnvironmentUids && selectedEnvironmentUids.length > 0) {
+        environments = environments.filter(e => selectedEnvironmentUids.includes(e.uid));
+      }
+      
+      result.totalEnvironments = environments.length;
+      
+      onProgress?.({
+        phase: 'environments',
+        message: `Deleting ${environments.length} environment(s)...`,
+        deleted: 0,
+        total: environments.length,
+      });
+
+      for (const environment of environments) {
+        const success = await deleteEnvironment(environment.uid);
+        if (success) {
+          result.deletedEnvironments++;
+        } else {
+          result.errors.push(`Failed to delete environment: ${environment.name}`);
+        }
+        
+        onProgress?.({
+          phase: 'environments',
+          deleted: result.deletedEnvironments,
+          total: environments.length,
+          currentItem: environment.name,
+        });
+        
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+
+    // STEP 4: Delete Collections
+    if (includeCollections) {
+      let collections = await getAllCollections(workspaceId);
+      
+      // Filter by selected UIDs if provided
+      if (selectedCollectionUids && selectedCollectionUids.length > 0) {
+        collections = collections.filter(c => selectedCollectionUids.includes(c.uid));
+      }
+      
+      result.totalCollections = collections.length;
+      
+      onProgress?.({
+        phase: 'collections',
+        message: `Deleting ${collections.length} collection(s)...`,
+        deleted: 0,
+        total: collections.length,
+      });
+
+      for (const collection of collections) {
+        const success = await deleteCollection(collection.uid);
+        if (success) {
+          result.deletedCollections++;
+        } else {
+          result.errors.push(`Failed to delete collection: ${collection.name}`);
+        }
+        
+        onProgress?.({
+          phase: 'collections',
+          deleted: result.deletedCollections,
+          total: collections.length,
+          currentItem: collection.name,
+        });
+        
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+
+    onProgress?.({
+      phase: 'complete',
+      message: 'Custom reset complete',
+      result,
+    });
+
+    return result;
+  } catch (error) {
+    result.errors.push(`Unexpected error: ${error.message}`);
+    onProgress?.({
+      phase: 'error',
+      message: error.message,
+      result,
+    });
+    throw error;
+  }
+};
