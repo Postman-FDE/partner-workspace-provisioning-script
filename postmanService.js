@@ -1,8 +1,28 @@
 import axios from "axios";
 
-const POSTMAN_API_KEY = import.meta.env.VITE_POSTMAN_API_KEY;
-const POSTMAN_TARGET_WORKSPACE_ID = import.meta.env.VITE_POSTMAN_TARGET_WORKSPACE_ID;
-const POSTMAN_SOURCE_WORKSPACE_ID = import.meta.env.VITE_POSTMAN_SOURCE_WORKSPACE_ID;
+// ============================================================================
+// ENVIRONMENT CONFIGURATION
+// ============================================================================
+// Supports both Node.js (process.env) and Vite (import.meta.env) environments
+// Uses unified variable names: POSTMAN_API_KEY, POSTMAN_SOURCE_WORKSPACE_ID, etc.
+// For Vite: define in vite.config.js or use VITE_ prefix as fallback
+// ============================================================================
+
+const getEnvVar = (name) => {
+  // Try process.env first (Node.js)
+  if (typeof process !== 'undefined' && process.env && process.env[name]) {
+    return process.env[name];
+  }
+  // Try import.meta.env (Vite) - both with and without VITE_ prefix
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    return import.meta.env[name] || import.meta.env[`VITE_${name}`];
+  }
+  return undefined;
+};
+
+const POSTMAN_API_KEY = getEnvVar('POSTMAN_API_KEY');
+const POSTMAN_TARGET_WORKSPACE_ID = getEnvVar('POSTMAN_TARGET_WORKSPACE_ID');
+const POSTMAN_SOURCE_WORKSPACE_ID = getEnvVar('POSTMAN_SOURCE_WORKSPACE_ID');
 const POSTMAN_API_BASE = "https://api.getpostman.com";
 
 // ============================================================================
@@ -164,6 +184,397 @@ export const initializeTargetWorkspace = async (options = {}) => {
       created: false,
     };
   }
+};
+
+// ============================================================================
+// WORKSPACE ROLES MANAGEMENT
+// ============================================================================
+
+/**
+ * Get all roles assigned in a workspace
+ * @param {string} workspaceId - The workspace ID
+ * @returns {Promise<{success: boolean, roles?: Array, error?: string}>}
+ */
+export const getWorkspaceRoles = async (workspaceId) => {
+  try {
+    const response = await axios.get(
+      `${POSTMAN_API_BASE}/workspaces/${workspaceId}/roles`,
+      {
+        headers: {
+          "X-Api-Key": POSTMAN_API_KEY || "",
+        },
+      }
+    );
+    return { success: true, roles: response.data.roles || [] };
+  } catch (error) {
+    return {
+      success: false,
+      error: axios.isAxiosError(error)
+        ? error.response?.data?.error?.message || error.message
+        : error instanceof Error
+        ? error.message
+        : "Unknown error",
+      roles: [],
+    };
+  }
+};
+
+/**
+ * Add a workspace admin (team member)
+ * @param {string} workspaceId - Target workspace ID
+ * @param {string} userId - User ID to add as admin
+ * @param {string} roleId - Role ID (default: "3" for Admin)
+ * @returns {Promise<{success: boolean, roles?: Array, error?: string}>}
+ */
+export const addWorkspaceAdmin = async (workspaceId, userId, roleId = "3") => {
+  try {
+    const response = await axios.patch(
+      `${POSTMAN_API_BASE}/workspaces/${workspaceId}/roles`,
+      {
+        roles: [
+          {
+            op: "add",
+            path: "/user",
+            value: [
+              {
+                id: userId,
+                role: roleId,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Api-Key": POSTMAN_API_KEY || "",
+        },
+      }
+    );
+    return { success: true, roles: response.data.roles };
+  } catch (error) {
+    return {
+      success: false,
+      error: axios.isAxiosError(error)
+        ? error.response?.data?.error?.message || error.message
+        : error instanceof Error
+        ? error.message
+        : "Unknown error",
+    };
+  }
+};
+
+/**
+ * Remove a user from workspace
+ * @param {string} workspaceId - Target workspace ID
+ * @param {string} userId - User ID to remove
+ * @param {string} roleId - Current role ID of the user
+ * @returns {Promise<{success: boolean, roles?: Array, error?: string}>}
+ */
+export const removeWorkspaceUser = async (workspaceId, userId, roleId) => {
+  try {
+    const response = await axios.patch(
+      `${POSTMAN_API_BASE}/workspaces/${workspaceId}/roles`,
+      {
+        roles: [
+          {
+            op: "remove",
+            path: "/user",
+            value: [
+              {
+                id: userId,
+                role: roleId,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Api-Key": POSTMAN_API_KEY || "",
+        },
+      }
+    );
+    return { success: true, roles: response.data.roles };
+  } catch (error) {
+    return {
+      success: false,
+      error: axios.isAxiosError(error)
+        ? error.response?.data?.error?.message || error.message
+        : error instanceof Error
+        ? error.message
+        : "Unknown error",
+    };
+  }
+};
+
+/**
+ * Add multiple admins to a workspace
+ * @param {string} workspaceId - Target workspace ID
+ * @param {Array<string>} userIds - Array of user IDs to add as admins
+ * @param {function} onProgress - Progress callback
+ * @returns {Promise<{success: Array, failed: Array}>}
+ */
+export const addMultipleAdmins = async (workspaceId, userIds, onProgress) => {
+  const results = { success: [], failed: [] };
+
+  for (let i = 0; i < userIds.length; i++) {
+    const userId = userIds[i];
+
+    onProgress?.({
+      phase: 'admins',
+      message: `Adding admin: ${userId}`,
+      current: i + 1,
+      total: userIds.length,
+    });
+
+    const addResult = await addWorkspaceAdmin(workspaceId, userId, "3");
+
+    if (addResult.success) {
+      results.success.push({
+        userId,
+        roleId: "3",
+      });
+    } else {
+      results.failed.push({
+        userId,
+        error: addResult.error,
+      });
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+
+  return results;
+};
+
+// ============================================================================
+// PARTNER INVITATIONS MANAGEMENT
+// ============================================================================
+
+/**
+ * Invite a partner to a workspace
+ * @param {string} workspaceId - Target workspace ID
+ * @param {string} email - Partner email to invite
+ * @param {string} roleId - Partner role ID (default: "7" for Editor and Partner Lead)
+ * @returns {Promise<{success: boolean, email: string, status?: string, invitationLink?: string, userId?: number, error?: string}>}
+ */
+export const invitePartner = async (workspaceId, email, roleId = "7") => {
+  try {
+    const response = await axios.post(
+      `${POSTMAN_API_BASE}/invitations`,
+      {
+        action: "invite_partner",
+        targetEntity: "workspace",
+        targetEntityId: workspaceId,
+        roleId: roleId,
+        target: {
+          emails: [email],
+        },
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Api-Key": POSTMAN_API_KEY || "",
+        },
+      }
+    );
+
+    const result = response.data.results?.[0] || {};
+    return {
+      success: true,
+      email: result.email || email,
+      status: result.status,
+      invitationLink: result.invitationLink || null,
+      userId: result.userId || null,
+      roleDisplayName: response.data.roleDisplayName,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      email,
+      error: axios.isAxiosError(error)
+        ? error.response?.data?.error?.message || error.message
+        : error instanceof Error
+        ? error.message
+        : "Unknown error",
+    };
+  }
+};
+
+/**
+ * Remove a partner from a workspace
+ * @param {string} workspaceId - Target workspace ID
+ * @param {string} userId - Partner user ID to remove
+ * @returns {Promise<{success: boolean, userId: string, status?: string, error?: string}>}
+ */
+export const removePartner = async (workspaceId, userId) => {
+  try {
+    const response = await axios.post(
+      `${POSTMAN_API_BASE}/invitations`,
+      {
+        action: "remove_partner",
+        targetEntity: "workspace",
+        targetEntityId: workspaceId,
+        target: {
+          userIds: [userId],
+        },
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Api-Key": POSTMAN_API_KEY || "",
+        },
+      }
+    );
+
+    const result = response.data.results?.[0] || {};
+    return {
+      success: true,
+      userId: result.userId || userId,
+      status: result.status,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      userId,
+      error: axios.isAxiosError(error)
+        ? error.response?.data?.error?.message || error.message
+        : error instanceof Error
+        ? error.message
+        : "Unknown error",
+    };
+  }
+};
+
+/**
+ * Remove a partner from the entire team
+ * @param {string} teamId - Publisher team ID
+ * @param {string} userId - Partner user ID to remove
+ * @returns {Promise<{success: boolean, userId: string, status?: string, error?: string}>}
+ */
+export const removePartnerFromTeam = async (teamId, userId) => {
+  try {
+    const response = await axios.post(
+      `${POSTMAN_API_BASE}/invitations`,
+      {
+        action: "remove_partner",
+        targetEntity: "team",
+        targetEntityId: teamId,
+        target: {
+          userIds: [userId],
+        },
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Api-Key": POSTMAN_API_KEY || "",
+        },
+      }
+    );
+
+    const result = response.data.results?.[0] || {};
+    return {
+      success: true,
+      userId: result.userId || userId,
+      status: result.status,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      userId,
+      error: axios.isAxiosError(error)
+        ? error.response?.data?.error?.message || error.message
+        : error instanceof Error
+        ? error.message
+        : "Unknown error",
+    };
+  }
+};
+
+/**
+ * Invite multiple partners to a workspace
+ * @param {string} workspaceId - Target workspace ID
+ * @param {Array<string>} emails - Array of partner emails to invite
+ * @param {string} roleId - Partner role ID (default: "7")
+ * @param {function} onProgress - Progress callback
+ * @returns {Promise<{success: Array, failed: Array}>}
+ */
+export const inviteMultiplePartners = async (workspaceId, emails, roleId = "7", onProgress) => {
+  const results = { success: [], failed: [] };
+
+  for (let i = 0; i < emails.length; i++) {
+    const email = emails[i];
+
+    onProgress?.({
+      phase: 'invitations',
+      message: `Inviting partner: ${email}`,
+      current: i + 1,
+      total: emails.length,
+    });
+
+    const inviteResult = await invitePartner(workspaceId, email, roleId);
+
+    if (inviteResult.success) {
+      results.success.push({
+        email: inviteResult.email,
+        status: inviteResult.status,
+        invitationLink: inviteResult.invitationLink,
+        userId: inviteResult.userId,
+        roleDisplayName: inviteResult.roleDisplayName,
+      });
+    } else {
+      results.failed.push({
+        email,
+        error: inviteResult.error,
+      });
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+
+  return results;
+};
+
+/**
+ * Remove multiple partners from a workspace
+ * @param {string} workspaceId - Target workspace ID
+ * @param {Array<string>} userIds - Array of partner user IDs to remove
+ * @param {function} onProgress - Progress callback
+ * @returns {Promise<{success: Array, failed: Array}>}
+ */
+export const removeMultiplePartners = async (workspaceId, userIds, onProgress) => {
+  const results = { success: [], failed: [] };
+
+  for (let i = 0; i < userIds.length; i++) {
+    const userId = userIds[i];
+
+    onProgress?.({
+      phase: 'removePartners',
+      message: `Removing partner: ${userId}`,
+      current: i + 1,
+      total: userIds.length,
+    });
+
+    const removeResult = await removePartner(workspaceId, userId);
+
+    if (removeResult.success) {
+      results.success.push({
+        userId: removeResult.userId,
+        status: removeResult.status,
+      });
+    } else {
+      results.failed.push({
+        userId,
+        error: removeResult.error,
+      });
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+
+  return results;
 };
 
 // ============================================================================
@@ -1138,6 +1549,9 @@ export const provisionWorkspace = async (options, onProgress) => {
     targetWorkspaceId,
     workspaceName = 'Partner Workspace',
     workspaceType = 'partner',
+    adminUserIds = [],      // NEW: Array of user IDs to add as admins
+    partnerEmails = [],     // NEW: Array of emails to invite as partners
+    partnerRoleId = "7",    // NEW: Partner role (default: Editor and Partner Lead)
   } = options;
 
   if (!POSTMAN_API_KEY) {
@@ -1156,6 +1570,8 @@ export const provisionWorkspace = async (options, onProgress) => {
     environments: { total: 0, success: 0, failed: [], successData: [] },
     mockEnv: { success: false, action: null },
     specs: { total: 0, success: 0, failed: [], successData: [] },
+    admins: { total: 0, success: 0, failed: [], successData: [] },
+    invitations: { total: 0, success: 0, failed: [], links: [] },
     errors: [],
   };
 
@@ -1440,6 +1856,101 @@ export const provisionWorkspace = async (options, onProgress) => {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
+    // Step 7: Add Team Admins (if provided)
+    if (adminUserIds.length > 0) {
+      onProgress?.({
+        phase: 'admins',
+        message: 'Adding workspace admins...',
+        progress: 88,
+      });
+
+      results.admins.total = adminUserIds.length;
+
+      for (let i = 0; i < adminUserIds.length; i++) {
+        const userId = adminUserIds[i];
+
+        onProgress?.({
+          phase: 'admins',
+          message: `Adding admin: ${userId}`,
+          current: i + 1,
+          total: adminUserIds.length,
+          progress: 88 + (i / adminUserIds.length) * 5,
+        });
+
+        const addResult = await addWorkspaceAdmin(workspaceId, userId, "3");
+
+        if (addResult.success) {
+          results.admins.success++;
+          results.admins.successData.push({
+            userId,
+            roleId: "3",
+          });
+        } else {
+          results.admins.failed.push({
+            userId,
+            error: addResult.error,
+          });
+          results.errors.push(`Failed to add admin ${userId}: ${addResult.error}`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+
+    // Step 8: Invite Partners (if provided)
+    if (partnerEmails.length > 0) {
+      onProgress?.({
+        phase: 'invitations',
+        message: 'Inviting partners...',
+        progress: 93,
+      });
+
+      results.invitations.total = partnerEmails.length;
+
+      for (let i = 0; i < partnerEmails.length; i++) {
+        const email = partnerEmails[i];
+
+        onProgress?.({
+          phase: 'invitations',
+          message: `Inviting partner: ${email}`,
+          current: i + 1,
+          total: partnerEmails.length,
+          progress: 93 + (i / partnerEmails.length) * 6,
+        });
+
+        const inviteResult = await invitePartner(workspaceId, email, partnerRoleId);
+
+        if (inviteResult.success) {
+          results.invitations.success++;
+          
+          const inviteData = {
+            email: inviteResult.email,
+            status: inviteResult.status,
+            invitationLink: inviteResult.invitationLink,
+            userId: inviteResult.userId,
+            roleDisplayName: inviteResult.roleDisplayName,
+          };
+          
+          // Add to links array if there's an invitation link
+          if (inviteResult.invitationLink) {
+            results.invitations.links.push({
+              email: inviteResult.email,
+              invitationLink: inviteResult.invitationLink,
+              status: inviteResult.status,
+            });
+          }
+        } else {
+          results.invitations.failed.push({
+            email,
+            error: inviteResult.error,
+          });
+          results.errors.push(`Failed to invite partner ${email}: ${inviteResult.error}`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+
     // Complete
     onProgress?.({
       phase: 'complete',
@@ -1677,8 +2188,13 @@ export const getAvailableResources = async (workspaceId) => {
  * @param {Array<string>} options.selectedEnvironmentUids - Specific environment UIDs to copy (optional)
  * @param {Array<string>} options.selectedSpecIds - Specific spec IDs to copy (optional)
  * @param {boolean} options.createMockEnv - Create/update Mock Env with mock URLs (default: true)
+ * @param {boolean} options.addAdmins - Add admins step (default: true)
+ * @param {boolean} options.invitePartners - Invite partners step (default: true)
+ * @param {Array<string>} options.adminUserIds - Array of user IDs to add as admins (optional)
+ * @param {Array<string>} options.partnerEmails - Array of emails to invite as partners (optional)
+ * @param {string} options.partnerRoleId - Partner role ID (default: "7" for Editor and Partner Lead)
  * @param {function} onProgress - Progress callback
- * @returns {Promise<object>} Provisioning results
+ * @returns {Promise<object>} Provisioning results including invitation links
  */
 export const provisionCustomWorkspace = async (options, onProgress) => {
   const {
@@ -1694,6 +2210,11 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
     selectedEnvironmentUids = null, // null = all environments
     selectedSpecIds = null, // null = all specs
     createMockEnv = true,
+    addAdmins = true,           // NEW: Add admins step
+    invitePartners = true,      // NEW: Invite partners step
+    adminUserIds = [],          // NEW: Array of user IDs to add as admins
+    partnerEmails = [],         // NEW: Array of emails to invite as partners
+    partnerRoleId = "7",        // NEW: Partner role (default: Editor and Partner Lead)
   } = options;
 
   if (!POSTMAN_API_KEY) {
@@ -1712,6 +2233,8 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
     environments: { total: 0, success: 0, failed: [], successData: [] },
     mockEnv: { success: false, action: null },
     specs: { total: 0, success: 0, failed: [], successData: [] },
+    admins: { total: 0, success: 0, failed: [], successData: [] },
+    invitations: { total: 0, success: 0, failed: [], links: [] },
     errors: [],
   };
 
@@ -2015,6 +2538,93 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
         }
         
         await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    // Add Team Admins (if enabled and provided)
+    if (addAdmins && adminUserIds.length > 0) {
+      onProgress?.({
+        phase: 'admins',
+        message: 'Adding workspace admins...',
+        progress: 88,
+      });
+
+      results.admins.total = adminUserIds.length;
+
+      for (let i = 0; i < adminUserIds.length; i++) {
+        const userId = adminUserIds[i];
+
+        onProgress?.({
+          phase: 'admins',
+          message: `Adding admin: ${userId}`,
+          current: i + 1,
+          total: adminUserIds.length,
+          progress: 88 + (i / adminUserIds.length) * 5,
+        });
+
+        const addResult = await addWorkspaceAdmin(workspaceId, userId, "3");
+
+        if (addResult.success) {
+          results.admins.success++;
+          results.admins.successData.push({
+            userId,
+            roleId: "3",
+          });
+        } else {
+          results.admins.failed.push({
+            userId,
+            error: addResult.error,
+          });
+          results.errors.push(`Failed to add admin ${userId}: ${addResult.error}`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+
+    // Invite Partners (if enabled and provided)
+    if (invitePartners && partnerEmails.length > 0) {
+      onProgress?.({
+        phase: 'invitations',
+        message: 'Inviting partners...',
+        progress: 93,
+      });
+
+      results.invitations.total = partnerEmails.length;
+
+      for (let i = 0; i < partnerEmails.length; i++) {
+        const email = partnerEmails[i];
+
+        onProgress?.({
+          phase: 'invitations',
+          message: `Inviting partner: ${email}`,
+          current: i + 1,
+          total: partnerEmails.length,
+          progress: 93 + (i / partnerEmails.length) * 6,
+        });
+
+        const inviteResult = await invitePartner(workspaceId, email, partnerRoleId);
+
+        if (inviteResult.success) {
+          results.invitations.success++;
+          
+          // Add to links array if there's an invitation link
+          if (inviteResult.invitationLink) {
+            results.invitations.links.push({
+              email: inviteResult.email,
+              invitationLink: inviteResult.invitationLink,
+              status: inviteResult.status,
+            });
+          }
+        } else {
+          results.invitations.failed.push({
+            email,
+            error: inviteResult.error,
+          });
+          results.errors.push(`Failed to invite partner ${email}: ${inviteResult.error}`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
     }
 

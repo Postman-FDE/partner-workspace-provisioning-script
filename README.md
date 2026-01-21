@@ -1,6 +1,6 @@
 # Postman Workspace Provisioning Tools
 
-Comprehensive tooling for automated Postman workspace provisioning and management. Available in two versions:
+Comprehensive tooling for automated Postman partner workspace provisioning and management. Available in two versions:
 - **CLI Version**: Command-line scripts for manual workspace operations
 - **Web Version**: JavaScript library for integration into web applications
 
@@ -16,8 +16,9 @@ Comprehensive tooling for automated Postman workspace provisioning and managemen
 - [Version 2: Web Library](#version-2-web-library)
   - [Setup](#web-setup)
   - [Available Functions](#available-functions)
-  - [Copy All Functions](#copy-all-functions)
-  - [Custom Selection Functions](#custom-selection-functions)
+  - [Provisioning Functions](#provisioning-functions)
+  - [Reset Functions](#reset-functions)
+  - [Team & Partner Management](#team--partner-management-functions)
   - [Helper Functions](#helper-functions)
   - [React Integration Examples](#react-integration-examples)
 - [API Reference](#api-reference)
@@ -28,17 +29,24 @@ Comprehensive tooling for automated Postman workspace provisioning and managemen
 
 ## Overview
 
-These tools automate the process of creating and managing Postman partner workspaces. They copy collections, create mock servers, manage environments, and transfer API specifications from a source workspace to a target workspace.
+These tools automate the process of creating and managing Postman partner workspaces. They handle the complete provisioning workflow from workspace creation through asset copying to team/partner management.
 
-### Provisioning Workflow
-1. **Copy Collections**: Fork all collections from source to target workspace
-2. **Create Mock Servers**: Generate mock servers for each collection
-3. **Copy Environments**: Duplicate environment configurations
-4. **Update Mock Environment**: Create/update "Mock Env" with mock server URLs
-5. **Copy API Specs**: Transfer all API specification files
+### Complete Provisioning Workflow
+
+```
+1. Workspace Creation     -> Create new partner workspace (or use existing)
+2. Copy Collections       -> Fork all collections from source workspace
+3. Create Mock Servers    -> Generate mock servers for each collection
+4. Copy Environments      -> Duplicate environment configurations
+5. Update Mock Env        -> Create/update "Mock Env" with mock server URLs
+6. Copy API Specs         -> Transfer all API specification files
+7. Add Team Admins        -> Add internal team members as workspace admins
+8. Invite Partners        -> Send partner invitations with invitation links
+```
 
 ### Reset Workflow
-Deletes workspace resources in reverse order:
+
+Deletes workspace resources in reverse dependency order:
 1. Delete API Specs
 2. Delete Mock Servers
 3. Delete Environments
@@ -48,32 +56,37 @@ Deletes workspace resources in reverse order:
 
 ## Features
 
-✅ **Complete Workspace Provisioning**
+### Complete Workspace Provisioning
 - Automated collection forking
 - Mock server creation and URL management
 - Environment variable handling
 - Multi-file API specification copying
+- **Team member management** (add admins)
+- **Partner invitation with "Run in Postman" links**
 
-✅ **Custom Selection Provisioning**
+### Custom Selection Provisioning
 - Choose specific asset types (Collections, Environments, Mocks, Specs)
 - Select individual items from each category
+- Enable/disable admin and partner steps
 - Build custom workflows for your specific needs
 
-✅ **Safe Reset Functionality**
+### Safe Reset Functionality
 - Dependency-aware deletion order
 - Confirmation prompts (CLI only)
 - Selective deletion options
 - Detailed error reporting
 
-✅ **Flexible Configuration**
+### Flexible Configuration
 - Use existing workspaces or create new ones
 - Environment variable configuration
 - Partner/team/private workspace types
+- Configurable partner roles
 
-✅ **Robust Error Handling**
+### Robust Error Handling
 - Detailed error logging
 - Progress callbacks
 - Rate limit management
+- Partial failure handling
 
 ---
 
@@ -86,6 +99,11 @@ cd fde-pw-creation-script
 
 # Install dependencies
 npm install
+
+# Copy environment template
+cp .env-example .env
+
+# Edit .env with your configuration
 ```
 
 ---
@@ -96,16 +114,21 @@ Command-line tools for interactive workspace management. Best for manual operati
 
 ### CLI Setup
 
-1. **Create `.env` file** in the project root:
+1. **Create `.env` file** in the project root (copy from `.env-example`):
 
 ```env
 # Required
-POSTMAN_API_KEY=your_api_key_here
-POSTMAN_SOURCE_WORKSPACE_ID=your_source_workspace_id
+POSTMAN_API_KEY=PMAK-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+POSTMAN_SOURCE_WORKSPACE_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
-# Optional (if not provided, will prompt/create new workspace)
-POSTMAN_TARGET_WORKSPACE_ID=your_target_workspace_id
-POSTMAN_WORKSPACE_NAME=My Partner Workspace
+# Optional - Target Workspace
+POSTMAN_TARGET_WORKSPACE_ID=           # Leave empty to create new workspace
+POSTMAN_WORKSPACE_NAME=Partner Workspace
+
+# Optional - Team Members & Partners
+POSTMAN_ADMIN_USER_IDS=12345,67890     # Comma-separated user IDs to add as admins
+PARTNER_EMAILS=partner1@company.com,partner2@company.com  # Comma-separated emails
+PARTNER_ROLE_ID=7                       # 4=Partner Viewer, 7=Editor and Partner Lead
 ```
 
 2. **Get your Postman API Key**:
@@ -116,7 +139,11 @@ POSTMAN_WORKSPACE_NAME=My Partner Workspace
 3. **Get Workspace IDs**:
    - Open Postman
    - Navigate to your workspace
-   - Copy the ID from the URL: `https://app.getpostman.com/workspace/<WORKSPACE_ID>`
+   - Go to Workspace Settings > Workspace ID
+   - Or copy from URL: `https://app.getpostman.com/workspace/<WORKSPACE_ID>`
+
+4. **Get User IDs for Admins**:
+   - User IDs can be found via Postman API or team management
 
 ### CLI Usage
 
@@ -134,11 +161,45 @@ node provision.js
 - If no target workspace ID is configured, you'll be prompted for a new workspace name
 - Review the configuration
 - Confirm to start provisioning
+- View summary with mock URLs and partner invitation links
 
 **With Flags:**
 ```bash
 # Skip interactive prompts and use .env configuration
 node provision.js --yes
+```
+
+**Example Output:**
+
+```
+════════════════════════════════════════════════════════════
+Provisioning Complete!
+════════════════════════════════════════════════════════════
+
+Target Workspace: Partner Workspace
+  ID: abc-123-def-456
+  Status: Created new
+
+Results Summary:
+  Collections:  3/3 copied
+  Mock Servers: 3/3 created
+  Environments: 2/2 copied
+  Mock Env:     created
+  Specs:        1/1 copied
+  Admins:       2/2 added
+  Partners:     2/2 invited
+
+Mock Server URLs:
+  Collection A: https://abc123.mock.pstmn.io
+  Collection B: https://def456.mock.pstmn.io
+
+Partner Invitation Links (Run in Postman):
+  partner1@company.com:
+    https://app.getpostman.com/join-team?invite_code=xxxxx
+  partner2@company.com:
+    https://app.getpostman.com/join-team?invite_code=yyyyy
+
+════════════════════════════════════════════════════════════
 ```
 
 #### Resetting a Workspace
@@ -168,17 +229,25 @@ node reset.js --yes
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `POSTMAN_API_KEY` | ✅ Yes | Your Postman API key |
-| `POSTMAN_SOURCE_WORKSPACE_ID` | ✅ Yes | Source workspace to copy from |
-| `POSTMAN_TARGET_WORKSPACE_ID` | ❌ No | Target workspace (creates new if not provided) |
-| `POSTMAN_WORKSPACE_NAME` | ❌ No | Name for new workspace (default: "Partner Workspace") |
+| `POSTMAN_API_KEY` | Yes | Your Postman API key |
+| `POSTMAN_SOURCE_WORKSPACE_ID` | Yes | Source workspace to copy from |
+| `POSTMAN_TARGET_WORKSPACE_ID` | No | Target workspace (creates new if not provided) |
+| `POSTMAN_WORKSPACE_NAME` | No | Name for new workspace (default: "Partner Workspace") |
+| `POSTMAN_ADMIN_USER_IDS` | No | Comma-separated user IDs to add as workspace admins |
+| `PARTNER_EMAILS` | No | Comma-separated partner emails to invite |
+| `PARTNER_ROLE_ID` | No | Partner role ID (default: "7" - Editor and Partner Lead) |
+
+#### Partner Role Reference
+
+| Role ID | Name | Description |
+|---------|------|-------------|
+| `4` | Partner Viewer | Read-only access to workspace |
+| `7` | Editor and Partner Lead | Full editing access with partner lead privileges |
 
 #### Command Line Options
 
 **Provision Script:**
 - `--yes`: Skip interactive prompts
-- `--workspace-id <id>`: Override target workspace ID
-- `--workspace-name <name>`: Override workspace name
 
 **Reset Script:**
 - `--yes`: Skip confirmation prompt
@@ -186,19 +255,21 @@ node reset.js --yes
 
 ### CLI Example Workflows
 
-#### Create a New Partner Workspace
+#### Create a New Partner Workspace with Full Setup
 
 ```bash
-# 1. Configure .env with source workspace only
+# 1. Configure .env with all options
 POSTMAN_API_KEY=PMAK-...
 POSTMAN_SOURCE_WORKSPACE_ID=abc-123
+POSTMAN_WORKSPACE_NAME=Acme Corp Partner Workspace
+POSTMAN_ADMIN_USER_IDS=12345678,87654321
+PARTNER_EMAILS=john@acme.com,jane@acme.com
+PARTNER_ROLE_ID=7
 
 # 2. Run provisioning
 npm run provision
 
-# 3. Follow prompts to name your new workspace
-# Enter name for new workspace [Partner Workspace]: My New Workspace
-# Proceed with provisioning? (Y/N): Y
+# 3. Share invitation links with partners
 ```
 
 #### Use Existing Target Workspace
@@ -213,14 +284,17 @@ POSTMAN_TARGET_WORKSPACE_ID=def-456
 npm run provision
 ```
 
-#### Reset a Workspace
+#### Copy Assets Only (No Team/Partner Management)
 
 ```bash
-# Run reset
-npm run reset
+# 1. Configure .env without admin/partner config
+POSTMAN_API_KEY=PMAK-...
+POSTMAN_SOURCE_WORKSPACE_ID=abc-123
+POSTMAN_WORKSPACE_NAME=My Workspace
+# Leave POSTMAN_ADMIN_USER_IDS and PARTNER_EMAILS empty
 
-# Confirm by typing RESET
-Type "RESET" to confirm: RESET
+# 2. Run provisioning (steps 6-7 will be skipped)
+npm run provision
 ```
 
 ---
@@ -233,25 +307,41 @@ JavaScript module for programmatic workspace management. Perfect for integrating
 
 1. **Install as a dependency** or copy `postmanService.js` to your project
 
-2. **Configure environment variables** (for Vite/Create React App):
+2. **Configure environment variables** (same as CLI - uses unified variable names):
 
 ```env
-VITE_POSTMAN_API_KEY=your_api_key_here
-VITE_POSTMAN_SOURCE_WORKSPACE_ID=your_source_workspace_id
-VITE_POSTMAN_TARGET_WORKSPACE_ID=your_target_workspace_id (optional)
+# Same variables work for both CLI and Web
+POSTMAN_API_KEY=your_api_key_here
+POSTMAN_SOURCE_WORKSPACE_ID=your_source_workspace_id
+POSTMAN_TARGET_WORKSPACE_ID=your_target_workspace_id (optional)
 ```
+
+**For Vite projects**, you can either:
+- Use a `vite.config.js` to expose these variables, OR
+- Use `VITE_` prefix (e.g., `VITE_POSTMAN_API_KEY`) - the library supports both
 
 3. **Import the module**:
 
 ```javascript
 import {
-  // Copy All Functions
+  // Provisioning Functions
   provisionWorkspace,
-  resetWorkspace,
-  
-  // Custom Selection Functions
   provisionCustomWorkspace,
+  
+  // Reset Functions
+  resetWorkspace,
   resetCustomWorkspace,
+  
+  // Team & Partner Management
+  getWorkspaceRoles,
+  addWorkspaceAdmin,
+  removeWorkspaceUser,
+  addMultipleAdmins,
+  invitePartner,
+  removePartner,
+  removePartnerFromTeam,
+  inviteMultiplePartners,
+  removeMultiplePartners,
   
   // Helper Functions
   getAvailableCollections,
@@ -259,6 +349,7 @@ import {
   validateApiKey,
   getWorkspace,
   getWorkspaceSummary,
+  getConfigurationStatus,
 } from './postmanService.js';
 ```
 
@@ -266,54 +357,73 @@ import {
 
 ### Available Functions
 
-The web library provides two categories of functions:
+#### Function Overview
 
 | Category | Function | Purpose |
 |----------|----------|---------|
-| **Copy All** | `provisionWorkspace()` | Copy ALL assets from source workspace |
-| **Copy All** | `resetWorkspace()` | Delete ALL assets in target workspace |
-| **Custom** | `provisionCustomWorkspace()` | Select specific asset types and items |
-| **Custom** | `resetCustomWorkspace()` | Delete specific asset types and items |
+| **Provisioning** | `provisionWorkspace()` | Complete provisioning with all assets |
+| **Provisioning** | `provisionCustomWorkspace()` | Selective provisioning with options |
+| **Reset** | `resetWorkspace()` | Delete all/selected asset types |
+| **Reset** | `resetCustomWorkspace()` | Delete specific items |
+| **Team** | `addWorkspaceAdmin()` | Add a user as workspace admin |
+| **Team** | `addMultipleAdmins()` | Batch add multiple admins |
+| **Team** | `removeWorkspaceUser()` | Remove a user from workspace |
+| **Partners** | `invitePartner()` | Invite a partner by email |
+| **Partners** | `inviteMultiplePartners()` | Batch invite multiple partners |
+| **Partners** | `removePartner()` | Remove partner from workspace |
 | **Helper** | `getAvailableCollections()` | Get collections for UI checklist |
 | **Helper** | `getAvailableResources()` | Get all resources for UI selection |
 
 ---
 
-### Copy All Functions
+### Provisioning Functions
 
-These functions copy or delete ALL assets without selection. Simple, one-call operations.
+#### `provisionWorkspace()` - Full Provisioning
 
-#### `provisionWorkspace()` - Copy All Assets
-
-Copies all collections, creates mocks, copies environments, and copies specs automatically.
+Copies all collections, creates mocks, copies environments, copies specs, adds admins, and invites partners.
 
 ```javascript
 import { provisionWorkspace } from './postmanService.js';
 
-// Create new workspace with all assets
 const results = await provisionWorkspace({
   sourceWorkspaceId: 'source-workspace-id',
   workspaceName: 'My Partner Workspace',
-  workspaceType: 'partner'  // 'partner' | 'team' | 'private'
+  workspaceType: 'partner',  // 'partner' | 'team' | 'private'
+  
+  // Team & Partner Management (optional)
+  adminUserIds: ['12345', '67890'],           // Add these users as admins
+  partnerEmails: ['partner@company.com'],     // Invite these partners
+  partnerRoleId: '7',                         // Partner role
 }, (progress) => {
   console.log(`${progress.phase}: ${progress.message}`);
   console.log(`Progress: ${progress.progress}%`);
 });
 
-console.log('Results:', results);
+// Access results
+console.log('Workspace:', results.workspace);
+console.log('Collections copied:', results.collections.success);
+console.log('Mocks created:', results.mocks.success);
+console.log('Admins added:', results.admins.success);
+console.log('Partners invited:', results.invitations.success);
+console.log('Invitation links:', results.invitations.links);
 ```
 
+**Full Options:**
+
 ```javascript
-// Use existing target workspace
-const results = await provisionWorkspace({
-  sourceWorkspaceId: 'source-workspace-id',
-  targetWorkspaceId: 'existing-target-workspace-id',
-}, (progress) => {
-  console.log(`${progress.phase}: ${progress.message}`);
-});
+{
+  sourceWorkspaceId: string,        // Required: Source workspace ID
+  targetWorkspaceId?: string,       // Optional: Existing target workspace
+  workspaceName?: string,           // Required if creating new workspace
+  workspaceType?: string,           // 'partner' | 'team' | 'private'
+  adminUserIds?: string[],          // User IDs to add as admins
+  partnerEmails?: string[],         // Partner emails to invite
+  partnerRoleId?: string,           // Partner role (default: "7")
+}
 ```
 
 **Returns:**
+
 ```javascript
 {
   workspace: { id, name, type },
@@ -323,69 +433,20 @@ const results = await provisionWorkspace({
   environments: { total, success, failed, successData },
   mockEnv: { success, action: 'created' | 'updated' },
   specs: { total, success, failed, successData },
+  admins: { total, success, failed, successData },
+  invitations: { 
+    total, 
+    success, 
+    failed, 
+    links: [{ email, link }]  // Partner invitation links
+  },
   errors: []
 }
 ```
-
-#### `resetWorkspace()` - Delete All Assets
-
-Deletes all resources in reverse dependency order.
-
-```javascript
-import { resetWorkspace } from './postmanService.js';
-
-// Delete ALL resources
-const results = await resetWorkspace(
-  'workspace-id-to-reset',
-  (progress) => {
-    console.log(`${progress.phase}: ${progress.message}`);
-    console.log(`Deleted: ${progress.deleted}/${progress.total}`);
-  }
-);
-
-console.log('Reset complete!', results);
-```
-
-```javascript
-// Partial reset - choose asset types
-const results = await resetWorkspace(
-  'workspace-id',
-  (progress) => console.log(progress),
-  {
-    includeSpecs: true,
-    includeMocks: true,
-    includeEnvironments: false,  // Keep environments
-    includeCollections: false,   // Keep collections
-  }
-);
-```
-
-**Returns:**
-```javascript
-{
-  deletedSpecs: number,
-  deletedMocks: number,
-  deletedEnvironments: number,
-  deletedCollections: number,
-  totalSpecs: number,
-  totalMocks: number,
-  totalEnvironments: number,
-  totalCollections: number,
-  errors: []
-}
-```
-
----
-
-### Custom Selection Functions
-
-These functions allow you to choose which asset types to copy/delete AND select specific items.
 
 #### `provisionCustomWorkspace()` - Selective Provisioning
 
-Copy specific asset types and/or specific items within each type.
-
-**Example 1: Copy Only Collections and Environments (Skip Mocks & Specs)**
+Choose which asset types and specific items to copy.
 
 ```javascript
 import { provisionCustomWorkspace } from './postmanService.js';
@@ -393,242 +454,197 @@ import { provisionCustomWorkspace } from './postmanService.js';
 const results = await provisionCustomWorkspace({
   sourceWorkspaceId: 'source-workspace-id',
   targetWorkspaceId: 'target-workspace-id',
-  copyCollections: true,      // ✅ Copy collections
-  copyEnvironments: true,     // ✅ Copy environments
-  copyMocks: false,           // ❌ Skip mocks
-  copySpecs: false,           // ❌ Skip specs
-}, (progress) => {
-  console.log(`${progress.phase}: ${progress.message}`);
-});
-```
-
-**Example 2: Copy Specific Collections Only**
-
-```javascript
-import { getAvailableCollections, provisionCustomWorkspace } from './postmanService.js';
-
-// Step 1: Get available collections (for UI checklist)
-const availableCollections = await getAvailableCollections('source-workspace-id');
-console.log(availableCollections);
-// [{ id, uid, name, selected: false, metadata: {...} }, ...]
-
-// Step 2: User selects specific collections (from UI)
-const selectedUids = [
-  availableCollections[0].uid,  // First collection
-  availableCollections[2].uid,  // Third collection
-];
-
-// Step 3: Provision only selected collections
-const results = await provisionCustomWorkspace({
-  sourceWorkspaceId: 'source-workspace-id',
-  targetWorkspaceId: 'target-workspace-id',
-  copyCollections: true,
-  copyMocks: true,                           // Create mocks for selected collections
-  copyEnvironments: false,
-  copySpecs: false,
-  selectedCollectionUids: selectedUids,      // ⭐ Only copy these collections
-}, (progress) => {
-  console.log(progress);
-});
-```
-
-**Example 3: Copy Collections + Specific Environments**
-
-```javascript
-import { getAvailableResources, provisionCustomWorkspace } from './postmanService.js';
-
-// Get all available resources
-const resources = await getAvailableResources('source-workspace-id');
-
-// Select specific items
-const selectedCollections = resources.collections
-  .filter(c => c.name.includes('Authentication'))
-  .map(c => c.uid);
-
-const selectedEnvironments = resources.environments
-  .filter(e => e.name.includes('Test'))
-  .map(e => e.uid);
-
-// Provision with selections
-const results = await provisionCustomWorkspace({
-  sourceWorkspaceId: 'source-workspace-id',
-  workspaceName: 'Custom Workspace',  // Create new workspace
+  
+  // Asset type toggles
   copyCollections: true,
   copyEnvironments: true,
   copyMocks: true,
-  copySpecs: false,
-  selectedCollectionUids: selectedCollections,
-  selectedEnvironmentUids: selectedEnvironments,
+  copySpecs: false,           // Skip specs
   createMockEnv: true,
+  
+  // Team & partner toggles
+  addAdmins: true,
+  invitePartners: true,
+  adminUserIds: ['12345'],
+  partnerEmails: ['partner@company.com'],
+  partnerRoleId: '7',
+  
+  // Optional: Specific items to copy
+  selectedCollectionUids: ['uid1', 'uid2'],  // null = all
+  selectedEnvironmentUids: null,              // null = all
+  selectedSpecIds: null,
 }, (progress) => {
-  console.log(`Progress: ${progress.progress}%`);
+  console.log(progress.message);
 });
 ```
 
-**Example 4: Copy Everything Except Specs**
-
-```javascript
-const results = await provisionCustomWorkspace({
-  sourceWorkspaceId: 'source-workspace-id',
-  targetWorkspaceId: 'target-workspace-id',
-  copyCollections: true,
-  copyEnvironments: true,
-  copyMocks: true,
-  copySpecs: false,  // ❌ Skip specs only
-  createMockEnv: true,
-}, (progress) => console.log(progress.message));
-```
-
-**Example 5: Copy Only Specs**
-
-```javascript
-const results = await provisionCustomWorkspace({
-  sourceWorkspaceId: 'source-workspace-id',
-  targetWorkspaceId: 'target-workspace-id',
-  copyCollections: false,
-  copyEnvironments: false,
-  copyMocks: false,
-  copySpecs: true,  // ✅ Only copy specs
-}, (progress) => console.log(progress));
-```
-
 **Full Options:**
+
 ```javascript
 {
-  sourceWorkspaceId: string,        // Required: Source workspace ID
-  targetWorkspaceId?: string,       // Optional: Existing target workspace
-  workspaceName?: string,           // Required if creating new workspace
-  workspaceType?: string,           // 'partner' | 'team' | 'private'
-  copyCollections?: boolean,        // Default: true
-  copyEnvironments?: boolean,       // Default: true
-  copyMocks?: boolean,              // Default: true
-  copySpecs?: boolean,              // Default: true
-  selectedCollectionUids?: string[], // Specific collection UIDs to copy
-  selectedEnvironmentUids?: string[], // Specific environment UIDs to copy
-  selectedSpecIds?: string[],       // Specific spec IDs to copy
-  createMockEnv?: boolean,          // Create/update Mock Env (default: true)
-}
-```
-
-#### `resetCustomWorkspace()` - Selective Reset
-
-Delete specific asset types and/or specific items within each type.
-
-**Example 1: Delete Only Mocks and Specs (Keep Collections & Environments)**
-
-```javascript
-import { resetCustomWorkspace } from './postmanService.js';
-
-const results = await resetCustomWorkspace(
-  'workspace-id',
-  (progress) => {
-    console.log(`${progress.phase}: ${progress.deleted}/${progress.total}`);
-  },
-  {
-    includeSpecs: true,         // ✅ Delete specs
-    includeMocks: true,         // ✅ Delete mocks
-    includeEnvironments: false, // ❌ Keep environments
-    includeCollections: false,  // ❌ Keep collections
-  }
-);
-
-console.log('Deleted:', results);
-```
-
-**Example 2: Delete Specific Collections Only**
-
-```javascript
-import { getAvailableCollections, resetCustomWorkspace } from './postmanService.js';
-
-// Get collections in target workspace
-const collections = await getAvailableCollections('target-workspace-id');
-
-// Select specific collections to delete
-const collectionsToDelete = collections
-  .filter(c => c.name.includes('Old') || c.name.includes('Test'))
-  .map(c => c.uid);
-
-// Delete only selected collections
-const results = await resetCustomWorkspace(
-  'workspace-id',
-  (progress) => console.log(progress),
-  {
-    includeCollections: true,
-    includeEnvironments: false,
-    includeMocks: false,
-    includeSpecs: false,
-    selectedCollectionUids: collectionsToDelete,  // ⭐ Only delete these
-  }
-);
-```
-
-**Example 3: Delete Test Environments Only**
-
-```javascript
-import { getAvailableResources, resetCustomWorkspace } from './postmanService.js';
-
-const resources = await getAvailableResources('workspace-id');
-
-// Select test environments to delete
-const testEnvUids = resources.environments
-  .filter(e => e.name.includes('Test'))
-  .map(e => e.uid);
-
-const results = await resetCustomWorkspace(
-  'workspace-id',
-  (progress) => console.log(progress),
-  {
-    includeEnvironments: true,
-    selectedEnvironmentUids: testEnvUids,  // Only delete test environments
-    includeCollections: false,
-    includeMocks: false,
-    includeSpecs: false,
-  }
-);
-```
-
-**Example 4: Clean Up Everything Except Production Collection**
-
-```javascript
-const allCollections = await getAvailableCollections('workspace-id');
-
-// Keep only the production collection
-const collectionsToDelete = allCollections
-  .filter(c => c.name !== 'Production Collection')
-  .map(c => c.uid);
-
-const results = await resetCustomWorkspace(
-  'workspace-id',
-  (progress) => console.log(progress),
-  {
-    includeSpecs: true,
-    includeMocks: true,
-    includeEnvironments: true,
-    includeCollections: true,
-    selectedCollectionUids: collectionsToDelete,  // Delete all except production
-  }
-);
-```
-
-**Full Options:**
-```javascript
-{
-  includeSpecs?: boolean,           // Default: true
-  includeMocks?: boolean,           // Default: true
-  includeEnvironments?: boolean,    // Default: true
-  includeCollections?: boolean,     // Default: true
-  selectedCollectionUids?: string[], // Specific collections to delete
-  selectedEnvironmentUids?: string[], // Specific environments to delete
-  selectedMockIds?: string[],       // Specific mocks to delete
-  selectedSpecIds?: string[],       // Specific specs to delete
+  sourceWorkspaceId: string,           // Required
+  targetWorkspaceId?: string,          // Optional: Existing target
+  workspaceName?: string,              // For new workspace
+  workspaceType?: string,              // 'partner' | 'team' | 'private'
+  copyCollections?: boolean,           // Default: true
+  copyEnvironments?: boolean,          // Default: true
+  copyMocks?: boolean,                 // Default: true
+  copySpecs?: boolean,                 // Default: true
+  createMockEnv?: boolean,             // Default: true
+  addAdmins?: boolean,                 // Default: true
+  invitePartners?: boolean,            // Default: true
+  selectedCollectionUids?: string[],   // null = all
+  selectedEnvironmentUids?: string[],  // null = all
+  selectedSpecIds?: string[],          // null = all
+  adminUserIds?: string[],             // Users to add as admin
+  partnerEmails?: string[],            // Partners to invite
+  partnerRoleId?: string,              // Default: "7"
 }
 ```
 
 ---
 
-### Helper Functions
+### Reset Functions
 
-Functions to retrieve resources for building selection UIs.
+#### `resetWorkspace()` - Delete All/Selected Asset Types
+
+```javascript
+import { resetWorkspace } from './postmanService.js';
+
+// Delete ALL resources
+const results = await resetWorkspace(
+  'workspace-id',
+  (progress) => console.log(`${progress.phase}: ${progress.deleted}/${progress.total}`)
+);
+
+// Partial reset - keep collections and environments
+const results = await resetWorkspace(
+  'workspace-id',
+  (progress) => console.log(progress),
+  {
+    includeSpecs: true,
+    includeMocks: true,
+    includeEnvironments: false,  // Keep
+    includeCollections: false,   // Keep
+  }
+);
+```
+
+#### `resetCustomWorkspace()` - Delete Specific Items
+
+```javascript
+import { resetCustomWorkspace, getAvailableCollections } from './postmanService.js';
+
+// Get collections and select specific ones to delete
+const collections = await getAvailableCollections('workspace-id');
+const toDelete = collections
+  .filter(c => c.name.includes('Test'))
+  .map(c => c.uid);
+
+const results = await resetCustomWorkspace(
+  'workspace-id',
+  (progress) => console.log(progress),
+  {
+    includeCollections: true,
+    selectedCollectionUids: toDelete,  // Only delete these
+    includeEnvironments: false,
+    includeMocks: false,
+    includeSpecs: false,
+  }
+);
+```
+
+---
+
+### Team & Partner Management Functions
+
+These functions can be used independently for team and partner management.
+
+#### Adding Workspace Admins
+
+```javascript
+import { addWorkspaceAdmin, addMultipleAdmins } from './postmanService.js';
+
+// Add a single admin
+const result = await addWorkspaceAdmin(
+  'workspace-id',
+  '12345678',    // User ID
+  '3'            // Role ID (3 = Admin)
+);
+
+if (result.success) {
+  console.log('Admin added:', result.userId);
+}
+
+// Add multiple admins
+const results = await addMultipleAdmins(
+  'workspace-id',
+  ['12345', '67890', '11111'],
+  (progress) => console.log(`Added ${progress.current}/${progress.total}`)
+);
+
+console.log('Successful:', results.filter(r => r.success).length);
+console.log('Failed:', results.filter(r => !r.success));
+```
+
+#### Inviting Partners
+
+```javascript
+import { invitePartner, inviteMultiplePartners } from './postmanService.js';
+
+// Invite a single partner
+const result = await invitePartner(
+  'workspace-id',
+  'partner@company.com',
+  '7'  // Role ID (7 = Editor and Partner Lead)
+);
+
+if (result.success) {
+  console.log('Invitation sent!');
+  console.log('Status:', result.status);
+  console.log('Invitation Link:', result.invitationLink);  // Share this!
+}
+
+// Invite multiple partners
+const results = await inviteMultiplePartners(
+  'workspace-id',
+  ['partner1@company.com', 'partner2@company.com'],
+  '7',
+  (progress) => console.log(`Invited ${progress.current}/${progress.total}`)
+);
+
+// Get all invitation links
+const invitationLinks = results
+  .filter(r => r.success && r.invitationLink)
+  .map(r => ({ email: r.email, link: r.invitationLink }));
+
+console.log('Invitation Links:', invitationLinks);
+```
+
+#### Removing Users
+
+```javascript
+import { removeWorkspaceUser, removePartner } from './postmanService.js';
+
+// Remove a user from workspace
+await removeWorkspaceUser('workspace-id', 'user-id', '3');
+
+// Remove a partner from workspace
+await removePartner('workspace-id', 'partner-user-id');
+```
+
+#### Getting Workspace Roles
+
+```javascript
+import { getWorkspaceRoles } from './postmanService.js';
+
+const roles = await getWorkspaceRoles('workspace-id');
+console.log('Current workspace roles:', roles);
+```
+
+---
+
+### Helper Functions
 
 #### `getAvailableCollections(workspaceId)`
 
@@ -637,19 +653,16 @@ Returns collections formatted for checkbox/checklist UI.
 ```javascript
 import { getAvailableCollections } from './postmanService.js';
 
-const collections = await getAvailableCollections('source-workspace-id');
+const collections = await getAvailableCollections('workspace-id');
 
-console.log(collections);
+// Result:
 // [
 //   {
 //     id: '12345',
 //     uid: '12345678-abc-def',
 //     name: 'Authentication Services',
-//     selected: false,  // Default selection state for UI
-//     metadata: {
-//       createdAt: '2024-01-01T00:00:00Z',
-//       updatedAt: '2024-01-15T00:00:00Z'
-//     }
+//     selected: false,
+//     metadata: { createdAt, updatedAt }
 //   },
 //   ...
 // ]
@@ -657,14 +670,14 @@ console.log(collections);
 
 #### `getAvailableResources(workspaceId)`
 
-Returns ALL resource types at once for comprehensive UIs.
+Returns ALL resource types at once.
 
 ```javascript
 import { getAvailableResources } from './postmanService.js';
 
-const resources = await getAvailableResources('source-workspace-id');
+const resources = await getAvailableResources('workspace-id');
 
-console.log(resources);
+// Result:
 // {
 //   collections: [{ id, uid, name, selected: false }, ...],
 //   environments: [{ id, uid, name, selected: false }, ...],
@@ -695,24 +708,33 @@ const status = getConfigurationStatus();
 
 ### React Integration Examples
 
-#### Simple "Copy All" Button
+#### Complete Provisioning with Partner Links
 
 ```javascript
 import React, { useState } from 'react';
 import { provisionWorkspace } from './postmanService';
 
-function SimpleProvisioner() {
+function PartnerProvisioner() {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
+  
+  const [config, setConfig] = useState({
+    workspaceName: 'Partner Workspace',
+    adminUserIds: '',
+    partnerEmails: '',
+  });
 
   const handleProvision = async () => {
     setLoading(true);
     try {
       const result = await provisionWorkspace({
-        sourceWorkspaceId: 'source-workspace-id',
-        workspaceName: 'New Workspace',
+        sourceWorkspaceId: 'your-source-workspace-id',
+        workspaceName: config.workspaceName,
+        workspaceType: 'partner',
+        adminUserIds: config.adminUserIds.split(',').map(s => s.trim()).filter(Boolean),
+        partnerEmails: config.partnerEmails.split(',').map(s => s.trim()).filter(Boolean),
       }, (progressData) => {
         setProgress(progressData.progress);
         setStatus(progressData.message);
@@ -728,32 +750,86 @@ function SimpleProvisioner() {
 
   return (
     <div>
-      <h2>Quick Provision</h2>
+      <h2>Partner Workspace Provisioning</h2>
+      
+      <div style={{ marginBottom: '20px' }}>
+        <label>
+          Workspace Name:
+          <input
+            type="text"
+            value={config.workspaceName}
+            onChange={(e) => setConfig({...config, workspaceName: e.target.value})}
+          />
+        </label>
+      </div>
+      
+      <div style={{ marginBottom: '20px' }}>
+        <label>
+          Admin User IDs (comma-separated):
+          <input
+            type="text"
+            value={config.adminUserIds}
+            onChange={(e) => setConfig({...config, adminUserIds: e.target.value})}
+            placeholder="12345, 67890"
+          />
+        </label>
+      </div>
+      
+      <div style={{ marginBottom: '20px' }}>
+        <label>
+          Partner Emails (comma-separated):
+          <input
+            type="text"
+            value={config.partnerEmails}
+            onChange={(e) => setConfig({...config, partnerEmails: e.target.value})}
+            placeholder="partner1@company.com, partner2@company.com"
+          />
+        </label>
+      </div>
+      
       <button onClick={handleProvision} disabled={loading}>
-        {loading ? 'Provisioning...' : 'Provision All Assets'}
+        {loading ? 'Provisioning...' : 'Provision Workspace'}
       </button>
       
       {loading && (
-        <div>
+        <div style={{ marginTop: '20px' }}>
           <div>Status: {status}</div>
           <div>Progress: {progress}%</div>
         </div>
       )}
       
       {results && (
-        <div>
+        <div style={{ marginTop: '20px' }}>
           <h3>Results</h3>
+          <p>Workspace: {results.workspace?.name}</p>
           <p>Collections: {results.collections.success}/{results.collections.total}</p>
           <p>Mocks: {results.mocks.success}/{results.mocks.total}</p>
-          <p>Environments: {results.environments.success}/{results.environments.total}</p>
-          <p>Specs: {results.specs.success}/{results.specs.total}</p>
+          <p>Admins Added: {results.admins.success}/{results.admins.total}</p>
+          <p>Partners Invited: {results.invitations.success}/{results.invitations.total}</p>
+          
+          {results.invitations.links.length > 0 && (
+            <div>
+              <h4>Partner Invitation Links (Run in Postman)</h4>
+              <ul>
+                {results.invitations.links.map((invite, i) => (
+                  <li key={i}>
+                    <strong>{invite.email}:</strong>
+                    <br />
+                    <a href={invite.link} target="_blank" rel="noopener noreferrer">
+                      {invite.link}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-export default SimpleProvisioner;
+export default PartnerProvisioner;
 ```
 
 #### Collection Selector with Checklist
@@ -770,9 +846,7 @@ function CollectionSelector() {
   const [selected, setSelected] = useState([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('');
 
-  // Load available collections
   useEffect(() => {
     const loadCollections = async () => {
       const data = await getAvailableCollections('source-workspace-id');
@@ -781,7 +855,6 @@ function CollectionSelector() {
     loadCollections();
   }, []);
 
-  // Toggle collection selection
   const toggleCollection = (uid) => {
     setSelected(prev =>
       prev.includes(uid)
@@ -790,16 +863,6 @@ function CollectionSelector() {
     );
   };
 
-  // Select/Deselect all
-  const toggleAll = () => {
-    if (selected.length === collections.length) {
-      setSelected([]);
-    } else {
-      setSelected(collections.map(c => c.uid));
-    }
-  };
-
-  // Provision selected collections
   const handleProvision = async () => {
     if (selected.length === 0) {
       alert('Please select at least one collection');
@@ -816,10 +879,10 @@ function CollectionSelector() {
         copyEnvironments: false,
         copySpecs: false,
         selectedCollectionUids: selected,
-        createMockEnv: true,
+        addAdmins: false,
+        invitePartners: false,
       }, (progressData) => {
         setProgress(progressData.progress);
-        setStatus(progressData.message);
       });
 
       alert(`Success! Copied ${results.collections.success} collections`);
@@ -834,17 +897,6 @@ function CollectionSelector() {
     <div>
       <h2>Select Collections to Copy</h2>
       
-      {/* Select All Button */}
-      <div style={{ marginBottom: '20px' }}>
-        <button onClick={toggleAll}>
-          {selected.length === collections.length ? 'Deselect All' : 'Select All'}
-        </button>
-        <span style={{ marginLeft: '10px' }}>
-          {selected.length} of {collections.length} selected
-        </span>
-      </div>
-
-      {/* Collection Checklist */}
       <div style={{ maxHeight: '400px', overflow: 'auto', border: '1px solid #ccc', padding: '10px' }}>
         {collections.map(collection => (
           <div key={collection.uid} style={{ marginBottom: '10px' }}>
@@ -860,38 +912,13 @@ function CollectionSelector() {
         ))}
       </div>
 
-      {/* Provision Button */}
-      <div style={{ marginTop: '20px' }}>
-        <button
-          onClick={handleProvision}
-          disabled={loading || selected.length === 0}
-          style={{ padding: '10px 20px', fontSize: '16px' }}
-        >
-          {loading ? 'Provisioning...' : 'Provision Selected Collections'}
-        </button>
-      </div>
-
-      {/* Progress Display */}
-      {loading && (
-        <div style={{ marginTop: '20px' }}>
-          <div>Status: {status}</div>
-          <div style={{ 
-            width: '100%', 
-            backgroundColor: '#f0f0f0', 
-            height: '20px', 
-            borderRadius: '10px' 
-          }}>
-            <div style={{
-              width: `${progress}%`,
-              backgroundColor: '#4CAF50',
-              height: '100%',
-              borderRadius: '10px',
-              transition: 'width 0.3s'
-            }} />
-          </div>
-          <div style={{ textAlign: 'center' }}>{progress}%</div>
-        </div>
-      )}
+      <button
+        onClick={handleProvision}
+        disabled={loading || selected.length === 0}
+        style={{ marginTop: '20px', padding: '10px 20px' }}
+      >
+        {loading ? `Provisioning... ${progress}%` : 'Provision Selected'}
+      </button>
     </div>
   );
 }
@@ -899,211 +926,9 @@ function CollectionSelector() {
 export default CollectionSelector;
 ```
 
-#### Multi-Resource Selector (All Asset Types)
-
-```javascript
-import React, { useState, useEffect } from 'react';
-import {
-  getAvailableResources,
-  provisionCustomWorkspace
-} from './postmanService';
-
-function MultiResourceSelector() {
-  const [resources, setResources] = useState({
-    collections: [],
-    environments: [],
-    specs: []
-  });
-  
-  const [selected, setSelected] = useState({
-    collections: [],
-    environments: [],
-    specs: []
-  });
-
-  const [options, setOptions] = useState({
-    copyCollections: true,
-    copyEnvironments: true,
-    copyMocks: true,
-    copySpecs: true,
-  });
-
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const loadResources = async () => {
-      const data = await getAvailableResources('source-workspace-id');
-      setResources(data);
-    };
-    loadResources();
-  }, []);
-
-  const toggleItem = (type, id) => {
-    setSelected(prev => ({
-      ...prev,
-      [type]: prev[type].includes(id)
-        ? prev[type].filter(item => item !== id)
-        : [...prev[type], id]
-    }));
-  };
-
-  const handleProvision = async () => {
-    setLoading(true);
-    try {
-      await provisionCustomWorkspace({
-        sourceWorkspaceId: 'source-workspace-id',
-        targetWorkspaceId: 'target-workspace-id',
-        ...options,
-        selectedCollectionUids: selected.collections.length > 0 ? selected.collections : null,
-        selectedEnvironmentUids: selected.environments.length > 0 ? selected.environments : null,
-        selectedSpecIds: selected.specs.length > 0 ? selected.specs : null,
-      }, (progress) => {
-        console.log(progress);
-      });
-      alert('Provisioning complete!');
-    } catch (error) {
-      alert(`Error: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div>
-      <h2>Custom Workspace Provisioning</h2>
-
-      {/* Asset Type Toggles */}
-      <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#f5f5f5' }}>
-        <h3>Select Asset Types to Copy</h3>
-        <label style={{ marginRight: '20px' }}>
-          <input
-            type="checkbox"
-            checked={options.copyCollections}
-            onChange={(e) => setOptions({...options, copyCollections: e.target.checked})}
-          />
-          Collections
-        </label>
-        <label style={{ marginRight: '20px' }}>
-          <input
-            type="checkbox"
-            checked={options.copyEnvironments}
-            onChange={(e) => setOptions({...options, copyEnvironments: e.target.checked})}
-          />
-          Environments
-        </label>
-        <label style={{ marginRight: '20px' }}>
-          <input
-            type="checkbox"
-            checked={options.copyMocks}
-            onChange={(e) => setOptions({...options, copyMocks: e.target.checked})}
-          />
-          Mock Servers
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={options.copySpecs}
-            onChange={(e) => setOptions({...options, copySpecs: e.target.checked})}
-          />
-          API Specs
-        </label>
-      </div>
-
-      {/* Resource Selection Lists */}
-      <div style={{ display: 'flex', gap: '20px' }}>
-        {/* Collections */}
-        {options.copyCollections && (
-          <div style={{ flex: 1 }}>
-            <h4>Collections ({selected.collections.length} selected)</h4>
-            <div style={{ maxHeight: '200px', overflow: 'auto', border: '1px solid #ddd', padding: '10px' }}>
-              {resources.collections.map(c => (
-                <div key={c.uid}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selected.collections.includes(c.uid)}
-                      onChange={() => toggleItem('collections', c.uid)}
-                    />
-                    {c.name}
-                  </label>
-                </div>
-              ))}
-            </div>
-            <small>Leave unchecked to copy all</small>
-          </div>
-        )}
-
-        {/* Environments */}
-        {options.copyEnvironments && (
-          <div style={{ flex: 1 }}>
-            <h4>Environments ({selected.environments.length} selected)</h4>
-            <div style={{ maxHeight: '200px', overflow: 'auto', border: '1px solid #ddd', padding: '10px' }}>
-              {resources.environments.map(e => (
-                <div key={e.uid}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selected.environments.includes(e.uid)}
-                      onChange={() => toggleItem('environments', e.uid)}
-                    />
-                    {e.name}
-                  </label>
-                </div>
-              ))}
-            </div>
-            <small>Leave unchecked to copy all</small>
-          </div>
-        )}
-
-        {/* Specs */}
-        {options.copySpecs && (
-          <div style={{ flex: 1 }}>
-            <h4>API Specs ({selected.specs.length} selected)</h4>
-            <div style={{ maxHeight: '200px', overflow: 'auto', border: '1px solid #ddd', padding: '10px' }}>
-              {resources.specs.map(s => (
-                <div key={s.id}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selected.specs.includes(s.id)}
-                      onChange={() => toggleItem('specs', s.id)}
-                    />
-                    {s.name} ({s.type})
-                  </label>
-                </div>
-              ))}
-            </div>
-            <small>Leave unchecked to copy all</small>
-          </div>
-        )}
-      </div>
-
-      <button 
-        onClick={handleProvision} 
-        disabled={loading}
-        style={{ marginTop: '20px', padding: '10px 30px', fontSize: '16px' }}
-      >
-        {loading ? 'Provisioning...' : 'Provision Workspace'}
-      </button>
-    </div>
-  );
-}
-
-export default MultiResourceSelector;
-```
-
 ---
 
 ## API Reference
-
-### Function Comparison Table
-
-| Function | Copies | Selectable | Use Case |
-|----------|--------|------------|----------|
-| `provisionWorkspace()` | ALL assets | Asset types only | Quick full copy |
-| `provisionCustomWorkspace()` | Selected assets | Types + Individual items | Custom workflows |
-| `resetWorkspace()` | ALL assets | Asset types only | Full workspace reset |
-| `resetCustomWorkspace()` | Selected assets | Types + Individual items | Targeted cleanup |
 
 ### Progress Callback
 
@@ -1111,7 +936,9 @@ All functions accept a progress callback:
 
 ```javascript
 (progress) => {
-  progress.phase      // Current phase: 'validation' | 'workspace' | 'collections' | 'mocks' | 'environments' | 'mockEnv' | 'specs' | 'complete' | 'error'
+  progress.phase      // Current phase: 'validation' | 'workspace' | 'collections' | 
+                      // 'mocks' | 'environments' | 'mockEnv' | 'specs' | 
+                      // 'admins' | 'partners' | 'complete' | 'error'
   progress.message    // Human-readable status message
   progress.progress   // Overall progress percentage (0-100)
   progress.current    // Current item number (for lists)
@@ -1125,11 +952,10 @@ All functions accept a progress callback:
 
 ```javascript
 try {
-  const results = await provisionCustomWorkspace({
+  const results = await provisionWorkspace({
     sourceWorkspaceId: 'source-id',
-    targetWorkspaceId: 'target-id',
-    copyCollections: true,
-    selectedCollectionUids: ['uid1', 'uid2'],
+    workspaceName: 'My Workspace',
+    partnerEmails: ['partner@company.com'],
   }, (progress) => console.log(progress));
 
   // Check for partial failures
@@ -1137,8 +963,14 @@ try {
     console.warn('Some operations failed:', results.errors);
   }
 
-  // Check success counts
-  console.log(`Copied ${results.collections.success}/${results.collections.total} collections`);
+  // Check specific success counts
+  console.log(`Collections: ${results.collections.success}/${results.collections.total}`);
+  console.log(`Partners: ${results.invitations.success}/${results.invitations.total}`);
+  
+  // Get invitation links for successful invitations
+  for (const invite of results.invitations.links) {
+    console.log(`Send to ${invite.email}: ${invite.link}`);
+  }
   
 } catch (error) {
   console.error('Provisioning failed:', error.message);
@@ -1153,20 +985,24 @@ try {
 
 The provisioning follows a specific order to ensure dependencies are met:
 
-1. **Collections** → Forked first as basis for mocks
-2. **Mock Servers** → Created for each collection
-3. **Environments** → Copied with original variables
-4. **Mock Environment** → Updated/created with mock URLs
-5. **API Specs** → Copied last (no dependencies)
+1. **Validation** -> Verify API key and workspaces
+2. **Workspace** -> Create or verify target workspace
+3. **Collections** -> Fork collections (basis for mocks)
+4. **Mock Servers** -> Create for each collection
+5. **Environments** -> Copy with original variables
+6. **Mock Environment** -> Update/create with mock URLs
+7. **API Specs** -> Copy specification files
+8. **Admins** -> Add team members as workspace admins
+9. **Partners** -> Invite partners and generate invitation links
 
 ### Reset Order
 
-The reset follows the reverse order to handle dependencies:
+The reset follows reverse order to handle dependencies:
 
-1. **API Specs** → Deleted first (no dependencies)
-2. **Mock Servers** → Deleted before collections (depend on collections)
-3. **Environments** → Deleted before clearing workspace
-4. **Collections** → Deleted last
+1. **API Specs** -> No dependencies
+2. **Mock Servers** -> Depend on collections
+3. **Environments** -> Independent
+4. **Collections** -> Deleted last
 
 ### Rate Limiting
 
@@ -1174,7 +1010,9 @@ Both versions include automatic delays between API calls:
 - Collections: 300ms delay
 - Mocks: 300ms delay
 - Environments: 300ms delay
-- Specs: 500ms delay (larger operations)
+- Specs: 500ms delay
+- Admins: 300ms delay
+- Partners: 300ms delay
 
 ---
 
@@ -1192,10 +1030,15 @@ Both versions include automatic delays between API calls:
 - Ensure you have access to the workspace
 - Check that the workspace hasn't been deleted
 
-#### "Failed to create mock server"
-- Verify the collection exists in the target workspace
-- Check that the collection has requests (mocks need endpoints)
-- Ensure you're not hitting rate limits
+#### "Failed to add admin"
+- Verify the user ID is correct
+- Ensure the user is part of your Postman team
+- Check that you have permission to add admins
+
+#### "Failed to invite partner"
+- Verify the email address format
+- Check that your team has Partner Workspaces enabled
+- Ensure you have permission to invite partners
 
 #### "Spec files not copying"
 - Confirm specs exist in source workspace
@@ -1217,7 +1060,7 @@ DEBUG=true npm run provision
 
 - Check the [Postman API Documentation](https://www.postman.com/postman/workspace/postman-public-workspace/documentation)
 - Review error messages carefully - they often indicate the exact issue
-- Ensure your Postman plan supports the features you're using
+- Ensure your Postman plan supports Partner Workspaces
 
 ---
 
@@ -1229,7 +1072,8 @@ fde-pw-creation-script/
 ├── reset.js             # CLI reset script
 ├── postmanService.js    # Web library module
 ├── package.json         # Dependencies and scripts
-├── .env                 # Configuration (create this)
+├── .env                 # Configuration (create from .env-example)
+├── .env-example         # Environment template
 └── README.md            # This file
 ```
 
