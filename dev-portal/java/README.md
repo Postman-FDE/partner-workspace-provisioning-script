@@ -2,23 +2,53 @@
 
 A Spring Boot-based Java SDK for the Postman API with reactive WebClient, Java 17 records, and high-level services for workspace provisioning and reset workflows.
 
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Available Functions](#available-functions)
+- [Provisioning Functions](#provisioning-functions)
+  - [ProvisioningService.provision()](#provisioningserviceprovision---full-provisioning)
+  - [Custom Provisioning](#custom-provisioning)
+- [Reset Functions](#reset-functions)
+  - [ResetService.reset()](#resetservicereset---delete-all-or-selected)
+  - [ResetService.resetCustom()](#resetserviceresetcustom---delete-specific-items)
+- [Team & Partner Management](#team--partner-management)
+- [Helper Functions](#helper-functions)
+- [Spring MVC + React Integration](#spring-mvc--react-integration)
+  - [REST Controllers](#rest-controllers)
+  - [Provision Workspace Button (React)](#provision-workspace-button-react)
+  - [Collection Selector with Checklist (React)](#collection-selector-with-checklist-react)
+- [Thymeleaf Integration](#thymeleaf-integration)
+- [Vaadin Integration](#vaadin-integration)
+- [HTMX Integration](#htmx-integration)
+- [API Reference](#api-reference)
+- [Workflow Details](#workflow-details)
+- [Troubleshooting](#troubleshooting)
+
+---
+
 ## Installation
+
+### Maven
 
 Add the dependency to your `pom.xml`:
 
 ```xml
 <dependency>
     <groupId>com.postman</groupId>
-    <artifactId>postman-sdk</artifactId>
+    <artifactId>postman-workspace-sdk</artifactId>
     <version>1.0.0</version>
 </dependency>
 ```
 
-Or for Gradle:
+### Gradle
 
 ```groovy
-implementation 'com.postman:postman-sdk:1.0.0'
+implementation 'com.postman:postman-workspace-sdk:1.0.0'
 ```
+
+---
 
 ## Quick Start
 
@@ -74,21 +104,280 @@ public class PostmanConfig {
 }
 ```
 
-## Features
+---
 
-- Spring Boot auto-configuration
-- Reactive WebClient with Project Reactor
-- Java 17 records for immutable DTOs
-- Automatic retry with exponential backoff
-- High-level services for provisioning and reset workflows
+## Available Functions
+
+### Function Overview
+
+| Category | Method | Return Type | Purpose |
+|----------|--------|-------------|---------|
+| **Provisioning** | `ProvisioningService.provision()` | `Mono<ProvisioningResult>` | Complete provisioning |
+| **Reset** | `ResetService.reset()` | `Mono<ResetResult>` | Delete resources |
+| **Reset** | `ResetService.scanWorkspace()` | `Mono<WorkspaceContents>` | Scan before reset |
+| **Workspace** | `client.getWorkspace()` | `Mono<Workspace>` | Get workspace |
+| **Workspace** | `client.createWorkspace()` | `Mono<ApiResponse<Workspace>>` | Create workspace |
+| **Collections** | `client.getCollections()` | `Mono<List<Collection>>` | Get all collections |
+| **Collections** | `client.forkCollection()` | `Mono<ApiResponse<Collection>>` | Fork collection |
+| **Collections** | `client.deleteCollection()` | `Mono<Boolean>` | Delete collection |
+| **Environments** | `client.getEnvironments()` | `Mono<List<Environment>>` | Get environments |
+| **Environments** | `client.createEnvironment()` | `Mono<ApiResponse<Environment>>` | Create environment |
+| **Mocks** | `client.getMocks()` | `Mono<List<MockServer>>` | Get mock servers |
+| **Mocks** | `client.createMock()` | `Mono<ApiResponse<MockServer>>` | Create mock |
+| **Specs** | `client.getSpecs()` | `Mono<List<Spec>>` | Get all specs |
+| **Specs** | `client.createSpec()` | `Mono<ApiResponse<Spec>>` | Create spec |
+| **Partners** | `client.invitePartner()` | `Mono<InvitationResult>` | Invite partner |
+| **Team** | `client.addWorkspaceAdmin()` | `Mono<ApiResponse<?>>` | Add admin |
+| **Validation** | `client.validateApiKey()` | `Mono<ApiResponse<CurrentUser>>` | Validate key |
 
 ---
 
-## Frontend Integration Patterns
+## Provisioning Functions
 
-### React (via Spring REST Controllers)
+### `ProvisioningService.provision()` - Full Provisioning
 
-**Spring Boot REST API**
+Copies all collections, creates mocks, copies environments, copies specs, adds admins, and invites partners.
+
+```java
+import com.postman.sdk.services.ProvisioningService;
+import com.postman.sdk.services.ProvisioningService.ProvisioningConfig;
+import com.postman.sdk.services.ProvisioningService.ProvisioningResult;
+
+@Service
+public class WorkspaceManager {
+    
+    private final ProvisioningService provisioningService;
+    
+    public WorkspaceManager(ProvisioningService provisioningService) {
+        this.provisioningService = provisioningService;
+    }
+    
+    public Mono<ProvisioningResult> createPartnerWorkspace(
+        String sourceWorkspaceId,
+        String workspaceName,
+        List<String> adminUserIds,
+        List<String> partnerEmails
+    ) {
+        var config = new ProvisioningConfig(
+            sourceWorkspaceId,
+            null,                    // targetWorkspaceId (null = create new)
+            workspaceName,
+            adminUserIds,
+            partnerEmails,
+            null,                    // partnerRoleId (default: "7")
+            event -> log.info("{}: {}", event.step(), event.message())
+        );
+        
+        return provisioningService.provision(config);
+    }
+}
+```
+
+**Configuration Record:**
+
+```java
+public record ProvisioningConfig(
+    String sourceWorkspaceId,
+    String targetWorkspaceId,        // null = create new workspace
+    String targetWorkspaceName,
+    List<String> adminUserIds,
+    List<String> partnerEmails,
+    String partnerRoleId,            // default: "7" (Editor and Partner Lead)
+    Consumer<ProgressEvent> onProgress
+) {}
+
+public record ProgressEvent(String step, String message) {}
+```
+
+**Result Class:**
+
+```java
+public static class ProvisioningResult {
+    public Workspace workspace;
+    public boolean workspaceCreated;
+    public ResourceResult collections;
+    public ResourceResult mocks;
+    public ResourceResult environments;
+    public ResourceResult specs;
+    public ResourceResult admins;
+    public InvitationsResult invitations;
+    
+    public static class ResourceResult {
+        public int total;
+        public int success;
+        public List<Map<String, String>> failed;
+    }
+    
+    public static class InvitationsResult extends ResourceResult {
+        public List<Map<String, String>> links;  // Partner invitation links
+    }
+}
+```
+
+### Custom Provisioning
+
+For selective provisioning, use the ProvisioningService with custom options:
+
+```java
+@Service
+public class CustomProvisioningService {
+    
+    private final PostmanClient client;
+    
+    public Mono<Map<String, Object>> provisionCustom(
+        String sourceWorkspaceId,
+        String targetWorkspaceId,
+        List<String> selectedCollectionUids,
+        boolean copyMocks,
+        boolean copyEnvironments
+    ) {
+        return Mono.zip(
+            copyCollections(sourceWorkspaceId, targetWorkspaceId, selectedCollectionUids),
+            copyMocks ? createMocksForCollections(targetWorkspaceId, selectedCollectionUids) : Mono.just(List.of()),
+            copyEnvironments ? copyAllEnvironments(sourceWorkspaceId, targetWorkspaceId) : Mono.just(List.of())
+        ).map(tuple -> Map.of(
+            "collections", tuple.getT1(),
+            "mocks", tuple.getT2(),
+            "environments", tuple.getT3()
+        ));
+    }
+    
+    private Mono<List<Collection>> copyCollections(
+        String sourceId, 
+        String targetId, 
+        List<String> uids
+    ) {
+        return client.getCollections(sourceId)
+            .flatMapMany(Flux::fromIterable)
+            .filter(c -> uids == null || uids.contains(c.uid()))
+            .flatMap(c -> client.forkCollection(c.uid(), c.name(), targetId)
+                .map(ApiResponse::data))
+            .collectList();
+    }
+}
+```
+
+---
+
+## Reset Functions
+
+### `ResetService.reset()` - Delete All or Selected
+
+```java
+import com.postman.sdk.services.ResetService;
+import com.postman.sdk.services.ResetService.ResetConfig;
+import com.postman.sdk.services.ResetService.ResetResult;
+
+@Service
+public class WorkspaceResetManager {
+    
+    private final ResetService resetService;
+    
+    public Mono<ResetResult> resetWorkspace(String workspaceId) {
+        var config = new ResetConfig(
+            workspaceId,
+            event -> log.info("{}: {}", event.step(), event.message())
+        );
+        
+        return resetService.reset(config);
+    }
+    
+    // Scan workspace before reset
+    public Mono<WorkspaceContents> scanWorkspace(String workspaceId) {
+        return resetService.scanWorkspace(workspaceId);
+    }
+}
+```
+
+### `ResetService.resetCustom()` - Delete Specific Items
+
+```java
+@Service
+public class SelectiveResetService {
+    
+    private final PostmanClient client;
+    
+    public Mono<Map<String, Integer>> deleteSelectedCollections(
+        String workspaceId,
+        List<String> collectionUids
+    ) {
+        return Flux.fromIterable(collectionUids)
+            .delayElements(Duration.ofMillis(300))
+            .flatMap(uid -> client.deleteCollection(uid))
+            .filter(success -> success)
+            .count()
+            .map(count -> Map.of(
+                "total", collectionUids.size(),
+                "deleted", count.intValue()
+            ));
+    }
+}
+```
+
+---
+
+## Team & Partner Management
+
+### Adding Workspace Admins
+
+```java
+@Service
+public class TeamManagementService {
+    
+    private final PostmanClient client;
+    
+    public Mono<List<AdminResult>> addMultipleAdmins(
+        String workspaceId,
+        List<String> userIds
+    ) {
+        return Flux.fromIterable(userIds)
+            .delayElements(Duration.ofMillis(300))
+            .flatMap(userId -> client.addWorkspaceAdmin(workspaceId, userId)
+                .map(result -> new AdminResult(userId, result.success(), result.error())))
+            .collectList();
+    }
+    
+    public record AdminResult(String userId, boolean success, String error) {}
+}
+```
+
+### Inviting Partners
+
+```java
+@Service
+public class PartnerInvitationService {
+    
+    private final PostmanClient client;
+    
+    public Mono<List<InvitationResult>> invitePartners(
+        String workspaceId,
+        List<String> emails,
+        String roleId
+    ) {
+        return Flux.fromIterable(emails)
+            .delayElements(Duration.ofMillis(300))
+            .flatMap(email -> client.invitePartner(workspaceId, email, roleId))
+            .collectList();
+    }
+    
+    // Get invitation links for display
+    public List<Map<String, String>> getInvitationLinks(List<InvitationResult> results) {
+        return results.stream()
+            .filter(r -> r.success() && r.invitationLink() != null)
+            .map(r -> Map.of(
+                "email", r.email(),
+                "link", r.invitationLink()
+            ))
+            .toList();
+    }
+}
+```
+
+---
+
+## Spring MVC + React Integration
+
+### REST Controllers
 
 ```java
 @RestController
@@ -136,9 +425,7 @@ public class WorkspaceApiController {
     }
 
     @PostMapping("/provision")
-    public Mono<ProvisioningService.ProvisioningResult> provision(
-        @RequestBody ProvisionRequest request
-    ) {
+    public Mono<ProvisionResponse> provision(@RequestBody ProvisionRequest request) {
         var config = new ProvisioningService.ProvisioningConfig(
             request.sourceWorkspaceId(),
             null,
@@ -148,7 +435,16 @@ public class WorkspaceApiController {
             null,
             null
         );
-        return provisioningService.provision(config);
+        
+        return provisioningService.provision(config)
+            .map(result -> new ProvisionResponse(
+                result.workspace.id(),
+                result.workspace.name(),
+                result.collections.success,
+                result.mocks.success,
+                result.invitations.success,
+                result.invitations.links
+            ));
     }
 
     @PostMapping("/{workspaceId}/reset")
@@ -159,16 +455,26 @@ public class WorkspaceApiController {
 
     // DTOs
     record WorkspaceSummary(int collections, int environments, int mocks, int specs) {}
+    
     record ProvisionRequest(
         String sourceWorkspaceId,
         String targetName,
         List<String> adminUserIds,
         List<String> partnerEmails
     ) {}
+    
+    record ProvisionResponse(
+        String workspaceId,
+        String workspaceName,
+        int collectionsCopied,
+        int mocksCreated,
+        int partnersInvited,
+        List<Map<String, String>> invitationLinks
+    ) {}
 }
 ```
 
-**React Frontend**
+### Provision Workspace Button (React)
 
 ```tsx
 // hooks/usePostman.ts
@@ -176,23 +482,26 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 const API_BASE = '/api/workspaces';
 
-interface Workspace {
-  id: string;
-  name: string;
-  type: string;
+interface ProvisionRequest {
+  sourceWorkspaceId: string;
+  targetName: string;
+  adminUserIds?: string[];
+  partnerEmails?: string[];
 }
 
-interface WorkspaceSummary {
-  collections: number;
-  environments: number;
-  mocks: number;
-  specs: number;
+interface ProvisionResponse {
+  workspaceId: string;
+  workspaceName: string;
+  collectionsCopied: number;
+  mocksCreated: number;
+  partnersInvited: number;
+  invitationLinks: { email: string; link: string }[];
 }
 
 export function useWorkspace(workspaceId: string) {
   return useQuery({
     queryKey: ['workspace', workspaceId],
-    queryFn: async (): Promise<Workspace> => {
+    queryFn: async () => {
       const res = await fetch(`${API_BASE}/${workspaceId}`);
       if (!res.ok) throw new Error('Failed to fetch workspace');
       return res.json();
@@ -200,11 +509,11 @@ export function useWorkspace(workspaceId: string) {
   });
 }
 
-export function useWorkspaceSummary(workspaceId: string) {
+export function useCollections(workspaceId: string) {
   return useQuery({
-    queryKey: ['workspace', workspaceId, 'summary'],
-    queryFn: async (): Promise<WorkspaceSummary> => {
-      const res = await fetch(`${API_BASE}/${workspaceId}/summary`);
+    queryKey: ['collections', workspaceId],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/${workspaceId}/collections`);
       return res.json();
     },
   });
@@ -214,12 +523,7 @@ export function useProvision() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async (data: {
-      sourceWorkspaceId: string;
-      targetName: string;
-      adminUserIds?: string[];
-      partnerEmails?: string[];
-    }) => {
+    mutationFn: async (data: ProvisionRequest): Promise<ProvisionResponse> => {
       const res = await fetch(`${API_BASE}/provision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -232,120 +536,173 @@ export function useProvision() {
     },
   });
 }
+
+// Component
+function PartnerProvisioner({ sourceWorkspaceId }: { sourceWorkspaceId: string }) {
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [partnerEmails, setPartnerEmails] = useState('');
+  const provision = useProvision();
+
+  const handleProvision = () => {
+    const emails = partnerEmails.split(',').map(e => e.trim()).filter(Boolean);
+    provision.mutate({
+      sourceWorkspaceId,
+      targetName: workspaceName,
+      partnerEmails: emails,
+    });
+  };
+
+  return (
+    <div className="provisioner">
+      <h2>Provision Partner Workspace</h2>
+      
+      <input
+        type="text"
+        value={workspaceName}
+        onChange={(e) => setWorkspaceName(e.target.value)}
+        placeholder="Workspace Name"
+      />
+      
+      <input
+        type="text"
+        value={partnerEmails}
+        onChange={(e) => setPartnerEmails(e.target.value)}
+        placeholder="Partner Emails (comma-separated)"
+      />
+      
+      <button onClick={handleProvision} disabled={provision.isPending}>
+        {provision.isPending ? 'Provisioning...' : 'Provision'}
+      </button>
+      
+      {provision.data && (
+        <div className="results">
+          <h3>Success!</h3>
+          <p>Workspace: {provision.data.workspaceName}</p>
+          <p>Collections: {provision.data.collectionsCopied}</p>
+          <p>Partners Invited: {provision.data.partnersInvited}</p>
+          
+          {provision.data.invitationLinks.length > 0 && (
+            <div>
+              <h4>Partner Invitation Links</h4>
+              <ul>
+                {provision.data.invitationLinks.map((invite, i) => (
+                  <li key={i}>
+                    <strong>{invite.email}:</strong>
+                    <a href={invite.link} target="_blank">{invite.link}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 ```
 
----
+### Collection Selector with Checklist (React)
 
-### Angular Integration
-
-**Angular Service**
-
-```typescript
-// postman.service.ts
-import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
-
-export interface Workspace {
-  id: string;
-  name: string;
-  type: string;
-}
-
-export interface Collection {
+```tsx
+interface Collection {
   id: string;
   uid: string;
   name: string;
 }
 
-export interface ProvisionRequest {
+function CollectionSelector({ 
+  sourceWorkspaceId, 
+  targetWorkspaceId 
+}: { 
   sourceWorkspaceId: string;
-  targetName: string;
-  adminUserIds?: string[];
-  partnerEmails?: string[];
-}
+  targetWorkspaceId: string;
+}) {
+  const { data: collections = [], isLoading } = useCollections(sourceWorkspaceId);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [provisioning, setProvisioning] = useState(false);
+  const [results, setResults] = useState<any>(null);
 
-@Injectable({
-  providedIn: 'root'
-})
-export class PostmanService {
-  private readonly baseUrl = '/api/workspaces';
+  const toggleCollection = (uid: string) => {
+    setSelected(prev =>
+      prev.includes(uid)
+        ? prev.filter(id => id !== uid)
+        : [...prev, uid]
+    );
+  };
 
-  constructor(private http: HttpClient) {}
+  const handleProvision = async () => {
+    setProvisioning(true);
+    try {
+      const res = await fetch('/api/workspaces/provision/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceWorkspaceId,
+          targetWorkspaceId,
+          selectedCollectionUids: selected,
+          copyMocks: true,
+        }),
+      });
+      setResults(await res.json());
+    } finally {
+      setProvisioning(false);
+    }
+  };
 
-  getWorkspace(workspaceId: string): Observable<Workspace> {
-    return this.http.get<Workspace>(`${this.baseUrl}/${workspaceId}`);
-  }
+  if (isLoading) return <div>Loading...</div>;
 
-  getCollections(workspaceId: string): Observable<Collection[]> {
-    return this.http.get<Collection[]>(`${this.baseUrl}/${workspaceId}/collections`);
-  }
-
-  getSummary(workspaceId: string): Observable<{
-    collections: number;
-    environments: number;
-    mocks: number;
-    specs: number;
-  }> {
-    return this.http.get<any>(`${this.baseUrl}/${workspaceId}/summary`);
-  }
-
-  provision(request: ProvisionRequest): Observable<any> {
-    return this.http.post(`${this.baseUrl}/provision`, request);
-  }
-
-  reset(workspaceId: string): Observable<any> {
-    return this.http.post(`${this.baseUrl}/${workspaceId}/reset`, {});
-  }
-}
-
-// workspace.component.ts
-@Component({
-  selector: 'app-workspace',
-  template: `
-    <div *ngIf="workspace$ | async as workspace">
-      <h1>{{ workspace.name }}</h1>
+  return (
+    <div className="collection-selector">
+      <h2>Select Collections to Copy</h2>
       
-      <div *ngIf="summary$ | async as summary">
-        <p>Collections: {{ summary.collections }}</p>
-        <p>Environments: {{ summary.environments }}</p>
-        <p>Mocks: {{ summary.mocks }}</p>
-        <p>Specs: {{ summary.specs }}</p>
+      <div className="actions">
+        <button onClick={() => setSelected(collections.map(c => c.uid))}>
+          Select All
+        </button>
+        <button onClick={() => setSelected([])}>
+          Select None
+        </button>
+        <span>{selected.length} of {collections.length} selected</span>
       </div>
       
-      <button (click)="provision()">Provision Clone</button>
+      <div className="collection-list">
+        {collections.map((c: Collection) => (
+          <div key={c.uid} className="collection-item">
+            <label>
+              <input
+                type="checkbox"
+                checked={selected.includes(c.uid)}
+                onChange={() => toggleCollection(c.uid)}
+              />
+              {c.name}
+            </label>
+          </div>
+        ))}
+      </div>
+
+      <button
+        onClick={handleProvision}
+        disabled={provisioning || selected.length === 0}
+      >
+        {provisioning ? 'Provisioning...' : `Provision ${selected.length} Collection(s)`}
+      </button>
+
+      {results && (
+        <div className="results">
+          <p>Copied {results.collectionsCopied} collections</p>
+          <p>Created {results.mocksCreated} mocks</p>
+        </div>
+      )}
     </div>
-  `
-})
-export class WorkspaceComponent implements OnInit {
-  workspace$!: Observable<Workspace>;
-  summary$!: Observable<any>;
-  
-  @Input() workspaceId!: string;
-
-  constructor(private postmanService: PostmanService) {}
-
-  ngOnInit() {
-    this.workspace$ = this.postmanService.getWorkspace(this.workspaceId);
-    this.summary$ = this.postmanService.getSummary(this.workspaceId);
-  }
-
-  provision() {
-    this.postmanService.provision({
-      sourceWorkspaceId: this.workspaceId,
-      targetName: 'Cloned Workspace',
-    }).subscribe(result => {
-      console.log('Provisioned:', result);
-    });
-  }
+  );
 }
 ```
 
 ---
 
-### Thymeleaf (Server-Side Templates)
+## Thymeleaf Integration
 
-**Controller**
+### Controller
 
 ```java
 @Controller
@@ -355,14 +712,8 @@ public class WorkspaceViewController {
     private final PostmanClient client;
     private final ProvisioningService provisioningService;
 
-    public WorkspaceViewController(PostmanClient client, ProvisioningService provisioningService) {
-        this.client = client;
-        this.provisioningService = provisioningService;
-    }
-
     @GetMapping("/{workspaceId}")
     public String workspaceDetail(@PathVariable String workspaceId, Model model) {
-        // Block for Thymeleaf (or use WebFlux Thymeleaf)
         Workspace workspace = client.getWorkspace(workspaceId).block();
         List<Collection> collections = client.getCollections(workspaceId).block();
         List<Environment> environments = client.getEnvironments(workspaceId).block();
@@ -378,32 +729,33 @@ public class WorkspaceViewController {
     public String provision(
         @RequestParam String sourceWorkspaceId,
         @RequestParam String targetName,
+        @RequestParam(required = false) String partnerEmails,
         RedirectAttributes redirectAttributes
     ) {
+        List<String> emails = partnerEmails != null
+            ? Arrays.stream(partnerEmails.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList()
+            : null;
+
         var config = new ProvisioningService.ProvisioningConfig(
-            sourceWorkspaceId,
-            null,
-            targetName,
-            null,
-            null,
-            null,
-            null
+            sourceWorkspaceId, null, targetName,
+            null, emails, null, null
         );
 
         ProvisioningService.ProvisioningResult result = 
             provisioningService.provision(config).block();
 
         redirectAttributes.addFlashAttribute("result", result);
-        redirectAttributes.addFlashAttribute("message", 
-            "Created workspace: " + (result.workspace != null ? result.workspace.name() : "Unknown"));
+        redirectAttributes.addFlashAttribute("invitationLinks", result.invitations.links);
 
-        return "redirect:/workspaces/" + 
-            (result.workspace != null ? result.workspace.id() : sourceWorkspaceId);
+        return "redirect:/workspaces/" + result.workspace.id();
     }
 }
 ```
 
-**Thymeleaf Template**
+### Template
 
 ```html
 <!-- templates/workspace/detail.html -->
@@ -413,7 +765,21 @@ public class WorkspaceViewController {
     <title th:text="${workspace.name}">Workspace</title>
 </head>
 <body>
-    <div th:if="${message}" class="alert" th:text="${message}"></div>
+    <div th:if="${result}" class="alert alert-success">
+        <h4>Provisioning Complete!</h4>
+        <p>Created workspace: <span th:text="${result.workspace.name}"></span></p>
+        <p>Collections: <span th:text="${result.collections.success}"></span>/<span th:text="${result.collections.total}"></span></p>
+        
+        <div th:if="${invitationLinks != null and !invitationLinks.isEmpty()}">
+            <h5>Partner Invitation Links</h5>
+            <ul>
+                <li th:each="invite : ${invitationLinks}">
+                    <strong th:text="${invite.email}"></strong>: 
+                    <a th:href="${invite.link}" target="_blank" th:text="${invite.link}"></a>
+                </li>
+            </ul>
+        </div>
+    </div>
 
     <h1 th:text="${workspace.name}">Workspace Name</h1>
     <p>Type: <span th:text="${workspace.type}"></span></p>
@@ -423,15 +789,20 @@ public class WorkspaceViewController {
         <li th:each="collection : ${collections}" th:text="${collection.name}">Collection</li>
     </ul>
 
-    <h2>Environments (<span th:text="${#lists.size(environments)}"></span>)</h2>
-    <ul>
-        <li th:each="env : ${environments}" th:text="${env.name}">Environment</li>
-    </ul>
-
     <h2>Provision Clone</h2>
     <form method="post" th:action="@{/workspaces/provision}">
         <input type="hidden" name="sourceWorkspaceId" th:value="${workspace.id}">
-        <input type="text" name="targetName" placeholder="New workspace name" required>
+        
+        <div class="form-group">
+            <label>New workspace name:</label>
+            <input type="text" name="targetName" placeholder="Partner Workspace" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Partner emails (comma-separated):</label>
+            <input type="text" name="partnerEmails" placeholder="partner@company.com">
+        </div>
+        
         <button type="submit">Provision</button>
     </form>
 </body>
@@ -440,9 +811,7 @@ public class WorkspaceViewController {
 
 ---
 
-### Vaadin (Full-Stack Java)
-
-**Vaadin View**
+## Vaadin Integration
 
 ```java
 @Route("workspace/:workspaceId")
@@ -456,7 +825,8 @@ public class WorkspaceView extends VerticalLayout implements BeforeEnterObserver
     private final H1 title = new H1();
     private final Grid<Collection> collectionsGrid = new Grid<>(Collection.class);
     private final TextField newWorkspaceName = new TextField("New Workspace Name");
-    private final Button provisionButton = new Button("Provision Clone");
+    private final TextField partnerEmails = new TextField("Partner Emails (comma-separated)");
+    private final Button provisionButton = new Button("Provision");
 
     public WorkspaceView(PostmanClient client, ProvisioningService provisioningService) {
         this.client = client;
@@ -465,7 +835,7 @@ public class WorkspaceView extends VerticalLayout implements BeforeEnterObserver
         configureGrid();
         configureProvisionForm();
         
-        add(title, collectionsGrid, newWorkspaceName, provisionButton);
+        add(title, collectionsGrid, newWorkspaceName, partnerEmails, provisionButton);
     }
 
     @Override
@@ -507,21 +877,35 @@ public class WorkspaceView extends VerticalLayout implements BeforeEnterObserver
             return;
         }
 
+        List<String> emails = Arrays.stream(partnerEmails.getValue().split(","))
+            .map(String::trim)
+            .filter(s -> !s.isEmpty())
+            .toList();
+
         var config = new ProvisioningService.ProvisioningConfig(
-            workspaceId,
-            null,
-            targetName,
-            null,
-            null,
-            null,
-            null
+            workspaceId, null, targetName,
+            null, emails.isEmpty() ? null : emails, null, null
         );
 
         provisioningService.provision(config)
             .subscribe(result -> {
                 getUI().ifPresent(ui -> ui.access(() -> {
                     Notification.show("Created: " + result.workspace.name());
+                    
+                    if (!result.invitations.links.isEmpty()) {
+                        Dialog dialog = new Dialog();
+                        dialog.setHeaderTitle("Partner Invitation Links");
+                        
+                        VerticalLayout content = new VerticalLayout();
+                        for (var link : result.invitations.links) {
+                            content.add(new Anchor(link.get("link"), link.get("email")));
+                        }
+                        dialog.add(content);
+                        dialog.open();
+                    }
+                    
                     newWorkspaceName.clear();
+                    partnerEmails.clear();
                 }));
             });
     }
@@ -530,9 +914,9 @@ public class WorkspaceView extends VerticalLayout implements BeforeEnterObserver
 
 ---
 
-### HTMX + Spring Boot
+## HTMX Integration
 
-**Controller with HTMX Support**
+### Controller
 
 ```java
 @Controller
@@ -540,44 +924,48 @@ public class WorkspaceView extends VerticalLayout implements BeforeEnterObserver
 public class HtmxWorkspaceController {
 
     private final PostmanClient client;
-
-    public HtmxWorkspaceController(PostmanClient client) {
-        this.client = client;
-    }
+    private final ProvisioningService provisioningService;
 
     @GetMapping("/{workspaceId}/collections")
-    public String getCollections(
-        @PathVariable String workspaceId,
-        Model model
-    ) {
+    public String getCollections(@PathVariable String workspaceId, Model model) {
         List<Collection> collections = client.getCollections(workspaceId).block();
         model.addAttribute("collections", collections);
         return "fragments/collections :: list";
     }
 
-    @GetMapping("/{workspaceId}/refresh")
-    public String refresh(
-        @PathVariable String workspaceId,
+    @PostMapping("/provision")
+    public String provision(
+        @RequestParam String sourceWorkspaceId,
+        @RequestParam String targetName,
+        @RequestParam(required = false) String partnerEmails,
         Model model
     ) {
-        Workspace workspace = client.getWorkspace(workspaceId).block();
-        List<Collection> collections = client.getCollections(workspaceId).block();
-        model.addAttribute("workspace", workspace);
-        model.addAttribute("collections", collections);
-        return "fragments/workspace-content :: content";
+        List<String> emails = partnerEmails != null
+            ? Arrays.stream(partnerEmails.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList()
+            : null;
+
+        var config = new ProvisioningService.ProvisioningConfig(
+            sourceWorkspaceId, null, targetName,
+            null, emails, null, null
+        );
+
+        var result = provisioningService.provision(config).block();
+        
+        model.addAttribute("result", result);
+        model.addAttribute("invitationLinks", result.invitations.links);
+        
+        return "fragments/provision-result :: result";
     }
 }
 ```
 
-**HTMX Template Fragment**
+### Templates
 
 ```html
-<!-- templates/fragments/collections.html -->
-<ul th:fragment="list" id="collections-list">
-    <li th:each="collection : ${collections}" th:text="${collection.name}"></li>
-</ul>
-
-<!-- Main page with HTMX -->
+<!-- templates/workspace.html -->
 <div id="workspace-content">
     <h1 th:text="${workspace.name}"></h1>
     
@@ -594,6 +982,36 @@ public class HtmxWorkspaceController {
         hx-trigger="load"
         hx-swap="innerHTML">
         Loading...
+    </div>
+    
+    <h2>Provision</h2>
+    <form 
+        hx-post="/htmx/workspaces/provision"
+        hx-target="#provision-result"
+        hx-swap="innerHTML">
+        <input type="hidden" name="sourceWorkspaceId" th:value="${workspace.id}">
+        <input type="text" name="targetName" placeholder="Workspace Name" required>
+        <input type="text" name="partnerEmails" placeholder="partner@company.com">
+        <button type="submit">Provision</button>
+    </form>
+    
+    <div id="provision-result"></div>
+</div>
+
+<!-- templates/fragments/provision-result.html -->
+<div th:fragment="result" class="provision-result">
+    <h3>Provisioning Complete!</h3>
+    <p>Workspace: <span th:text="${result.workspace.name}"></span></p>
+    <p>Collections: <span th:text="${result.collections.success}"></span></p>
+    
+    <div th:if="${invitationLinks != null and !invitationLinks.isEmpty()}">
+        <h4>Partner Invitation Links</h4>
+        <ul>
+            <li th:each="link : ${invitationLinks}">
+                <strong th:text="${link.email}"></strong>:
+                <a th:href="${link.link}" target="_blank" th:text="${link.link}"></a>
+            </li>
+        </ul>
     </div>
 </div>
 ```
@@ -613,41 +1031,89 @@ Main SDK client with reactive methods.
 | `createWorkspace(name, type, desc)` | `Mono<ApiResponse<Workspace>>` | Create workspace |
 | `getCollections(workspaceId)` | `Mono<List<Collection>>` | Get all collections |
 | `forkCollection(uid, label, targetId)` | `Mono<ApiResponse<Collection>>` | Fork a collection |
+| `deleteCollection(uid)` | `Mono<Boolean>` | Delete collection |
 | `getEnvironments(workspaceId)` | `Mono<List<Environment>>` | Get all environments |
+| `createEnvironment(name, values, wsId)` | `Mono<ApiResponse<Environment>>` | Create environment |
 | `getMocks(workspaceId)` | `Mono<List<MockServer>>` | Get all mocks |
+| `createMock(name, collectionUid, wsId)` | `Mono<ApiResponse<MockServer>>` | Create mock |
+| `deleteMock(mockId)` | `Mono<Boolean>` | Delete mock |
 | `getSpecs(workspaceId)` | `Mono<List<Spec>>` | Get all specs |
-| `invitePartner(workspaceId, email, roleId)` | `Mono<InvitationResult>` | Invite partner |
+| `createSpec(wsId, name, type, files)` | `Mono<ApiResponse<Spec>>` | Create spec |
+| `deleteSpec(specId)` | `Mono<ApiResponse<?>>` | Delete spec |
+| `invitePartner(wsId, email, roleId)` | `Mono<InvitationResult>` | Invite partner |
+| `addWorkspaceAdmin(wsId, userId)` | `Mono<ApiResponse<?>>` | Add admin |
 
-### ProvisioningService
+---
 
-High-level provisioning workflow.
+## Workflow Details
 
-```java
-var config = new ProvisioningService.ProvisioningConfig(
-    "source-workspace-id",
-    null,  // targetWorkspaceId (null = create new)
-    "New Workspace Name",
-    List.of("admin-user-id"),
-    List.of("partner@example.com"),
-    null,  // partnerRoleId
-    event -> System.out.println(event.message())
-);
+### Provisioning Order
 
-Mono<ProvisioningResult> result = provisioningService.provision(config);
-```
+| Step | Phase | Description |
+|------|-------|-------------|
+| 1 | Validation | Verify API key and workspaces |
+| 2 | Workspace | Create or verify target workspace |
+| 3 | Collections | Fork collections (basis for mocks) |
+| 4 | Mock Servers | Create for each collection |
+| 5 | Environments | Copy with original variables |
+| 6 | Mock Environment | Update/create with mock URLs |
+| 7 | API Specs | Copy specification files |
+| 8 | Admins | Add team members as workspace admins |
+| 9 | Partners | Invite partners and generate invitation links |
 
-### ResetService
+### Reset Order
 
-High-level reset workflow.
+| Step | Phase | Reason |
+|------|-------|--------|
+| 1 | API Specs | No dependencies |
+| 2 | Mock Servers | Depend on collections |
+| 3 | Environments | Independent |
+| 4 | Collections | Deleted last |
 
-```java
-var config = new ResetService.ResetConfig(
-    "workspace-to-reset",
-    event -> System.out.println(event.message())
-);
+### Rate Limiting
 
-Mono<ResetResult> result = resetService.reset(config);
-```
+| Operation | Delay |
+|-----------|-------|
+| Collections | 300ms |
+| Mocks | 300ms |
+| Environments | 300ms |
+| Specs | 500ms |
+| Admins | 300ms |
+| Partners | 300ms |
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### "Invalid API key"
+- Verify your API key is correct and hasn't expired
+- Check that the key has appropriate permissions
+- Generate a new key at [Postman Account Settings](https://go.postman.co/settings/me/api-keys)
+
+#### "Workspace not found"
+- Confirm workspace IDs are correct
+- Ensure you have access to the workspace
+
+#### "Failed to add admin"
+- Verify the user ID is correct
+- Ensure the user is part of your Postman team
+
+#### "Failed to invite partner"
+- Verify the email address format
+- Check that your team has Partner Workspaces enabled
+
+#### "Spec files not copying"
+- Confirm specs exist in source workspace
+- Verify spec type is supported (OPENAPI:3.0, OPENAPI:3.1, ASYNCAPI:2.0)
+
+### Partner Role Reference
+
+| Role ID | Name | Description |
+|---------|------|-------------|
+| `4` | Partner Viewer | Read-only access |
+| `7` | Editor and Partner Lead | Full editing access |
 
 ---
 
