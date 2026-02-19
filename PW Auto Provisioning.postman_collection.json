@@ -1,0 +1,1319 @@
+{
+	"info": {
+		"_postman_id": "06c25c94-13c6-46b3-b0ed-07e6ecb6a635",
+		"name": "PW Auto Provisioning",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "49382747",
+		"_collection_link": "https://postman.postman.co/workspace/Partner-Workspaces-Team-Interna~2ea7ebca-1c87-42df-8c38-3a682d5e478d/collection/12627645-06c25c94-13c6-46b3-b0ed-07e6ecb6a635?action=share&source=collection_link&creator=49382747"
+	},
+	"item": [
+		{
+			"name": "Provisioning",
+			"item": [
+				{
+					"name": "Create a workspace",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Parse response and extract workspace ID",
+									"try {",
+									"    const jsonData = pm.response.json();",
+									"    ",
+									"    // Check if workspace.id exists in the response",
+									"    if (jsonData && jsonData.workspace && jsonData.workspace.id) {",
+									"        const workspaceId = jsonData.workspace.id;",
+									"        ",
+									"        // Set the workspace ID as an environment variable",
+									"        pm.environment.set(\"workspaceId\", workspaceId);",
+									"        ",
+									"        console.log(\"Successfully set workspaceId:\", workspaceId);",
+									"    } else {",
+									"        console.error(\"workspace.id not found in the response\");",
+									"    }",
+									"} catch (error) {",
+									"    console.error(\"Error parsing JSON response:\", error.message);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"workspace\": {\n        \"name\": \"{{workspaceName}}\",\n        \"type\": \"{{workspaceType}}\",\n        \"description\": \"{{workspaceDescription}}\",\n        \"about\": \"{{workspaceSummary}}\"\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/workspaces",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"workspaces"
+							]
+						},
+						"description": "Creates a new [workspace](https://learning.postman.com/docs/collaborating-in-postman/using-workspaces/creating-workspaces/).\n\n**Note:**\n\n- This endpoint returns a 403 `Forbidden` response if the user does not have permission to create workspaces. [Admins and Super Admins](https://learning.postman.com/docs/collaborating-in-postman/roles-and-permissions/#team-roles) can configure workspace permissions to restrict users and/or user groups from creating workspaces or require approvals for the creation of team workspaces.\n    \n- Private and [Partner Workspaces](https://learning.postman.com/docs/collaborating-in-postman/using-workspaces/partner-workspaces/) are available on Postman [<b>Professional</b> and <b>Enterprise</b> plans](https://www.postman.com/pricing).\n    \n- There are rate limits when publishing public workspaces.\n    \n- Public team workspace names must be unique."
+					},
+					"response": [
+						{
+							"name": "200",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"workspace\": {\n        \"name\": \"{{workspaceName}}\",\n        \"type\": \"{{workspaceType}}\",\n        \"description\": \"{{workspaceDescription}}\",\n        \"about\": \"{{workspaceSummary}}\"\n    }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/workspaces",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"workspaces"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Date",
+									"value": "Tue, 06 Jan 2026 07:11:16 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "gzip"
+								},
+								{
+									"key": "x-ratelimit-limit",
+									"value": "300"
+								},
+								{
+									"key": "x-ratelimit-remaining",
+									"value": "298"
+								},
+								{
+									"key": "x-ratelimit-reset",
+									"value": "21"
+								},
+								{
+									"key": "ratelimit-limit",
+									"value": "300"
+								},
+								{
+									"key": "ratelimit-remaining",
+									"value": "298"
+								},
+								{
+									"key": "ratelimit-reset",
+									"value": "21"
+								},
+								{
+									"key": "ratelimit",
+									"value": "limit=300, remaining=298, reset=21"
+								},
+								{
+									"key": "ratelimit-policy",
+									"value": "300;w=60"
+								},
+								{
+									"key": "x-frame-options",
+									"value": "deny"
+								},
+								{
+									"key": "x-xss-protection",
+									"value": "1; mode=block"
+								},
+								{
+									"key": "x-content-type-options",
+									"value": "nosniff"
+								},
+								{
+									"key": "referrer-policy",
+									"value": "no-referrer-when-downgrade"
+								},
+								{
+									"key": "access-control-allow-origin",
+									"value": "*"
+								},
+								{
+									"key": "access-control-allow-methods",
+									"value": "GET,POST,PUT,DELETE"
+								},
+								{
+									"key": "access-control-allow-headers",
+									"value": "Accept,X-Api-Key,Content-Type"
+								},
+								{
+									"key": "access-control-allow-credentials",
+									"value": "false"
+								},
+								{
+									"key": "uwebsockets",
+									"value": "20"
+								},
+								{
+									"key": "x-envoy-upstream-service-time",
+									"value": "432"
+								},
+								{
+									"key": "access-control-max-age",
+									"value": "5"
+								},
+								{
+									"key": "access-control-expose-headers",
+									"value": "*"
+								},
+								{
+									"key": "x-ratelimit-limit-month",
+									"value": "1000000"
+								},
+								{
+									"key": "x-ratelimit-remaining-month",
+									"value": "999980"
+								},
+								{
+									"key": "ratelimit-limit-month",
+									"value": "1000000"
+								},
+								{
+									"key": "ratelimit-remaining-month",
+									"value": "999980"
+								},
+								{
+									"key": "cf-cache-status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "9b99667b9d993c06-BLR"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"workspace\": {\n        \"id\": \"a6ce8ac9-0090-4089-9e4e-86d7d877d432\",\n        \"name\": \"Postman <-> Liblab Partner APIs\"\n    }\n}"
+						}
+					]
+				},
+				{
+					"name": "Create a fork",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n\t\"label\": \"{{collectionForkName}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/collections/fork/:collectionId?workspace={{workspaceId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"collections",
+								"fork",
+								":collectionId"
+							],
+							"query": [
+								{
+									"key": "workspace",
+									"value": "{{workspaceId}}",
+									"description": "The workspace ID in which to fork the collection."
+								}
+							],
+							"variable": [
+								{
+									"key": "collectionId",
+									"value": "{{collectionId}}",
+									"description": "The collection's ID."
+								}
+							]
+						},
+						"description": "Creates a [fork](https://learning.postman.com/docs/collaborating-in-postman/version-control/#creating-a-fork) from an existing collection into a workspace."
+					},
+					"response": [
+						{
+							"name": "200",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n\t\"label\": \"{{collectionForkName}}\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/collections/fork/:collectionId?workspace={{workspaceId}}",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"collections",
+										"fork",
+										":collectionId"
+									],
+									"query": [
+										{
+											"key": "workspace",
+											"value": "{{workspaceId}}",
+											"description": "The workspace ID in which to fork the collection."
+										}
+									],
+									"variable": [
+										{
+											"key": "collectionId",
+											"value": "{{collectionId}}",
+											"description": "The collection's ID."
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Date",
+									"value": "Tue, 06 Jan 2026 07:11:31 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "gzip"
+								},
+								{
+									"key": "x-ratelimit-limit",
+									"value": "300"
+								},
+								{
+									"key": "x-ratelimit-remaining",
+									"value": "297"
+								},
+								{
+									"key": "x-ratelimit-reset",
+									"value": "7"
+								},
+								{
+									"key": "ratelimit-limit",
+									"value": "300"
+								},
+								{
+									"key": "ratelimit-remaining",
+									"value": "297"
+								},
+								{
+									"key": "ratelimit-reset",
+									"value": "7"
+								},
+								{
+									"key": "ratelimit",
+									"value": "limit=300, remaining=297, reset=7"
+								},
+								{
+									"key": "ratelimit-policy",
+									"value": "300;w=60"
+								},
+								{
+									"key": "uwebsockets",
+									"value": "20"
+								},
+								{
+									"key": "access-control-allow-origin",
+									"value": "*"
+								},
+								{
+									"key": "access-control-allow-methods",
+									"value": "GET,POST,PUT,DELETE"
+								},
+								{
+									"key": "access-control-max-age",
+									"value": "5"
+								},
+								{
+									"key": "access-control-expose-headers",
+									"value": "*"
+								},
+								{
+									"key": "access-control-allow-headers",
+									"value": "Accept,X-Api-Key,Content-Type"
+								},
+								{
+									"key": "x-ratelimit-limit-month",
+									"value": "1000000"
+								},
+								{
+									"key": "x-ratelimit-remaining-month",
+									"value": "999979"
+								},
+								{
+									"key": "ratelimit-limit-month",
+									"value": "1000000"
+								},
+								{
+									"key": "ratelimit-remaining-month",
+									"value": "999979"
+								},
+								{
+									"key": "x-envoy-upstream-service-time",
+									"value": "2249"
+								},
+								{
+									"key": "cf-cache-status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "9b9966d04d673c06-BLR"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"collection\": {\n        \"id\": \"8aa6eb64-f26d-4d22-b353-ea6b83c227a4\",\n        \"name\": \"Token Scanning\",\n        \"fork\": {\n            \"label\": \"Liblab's fork\",\n            \"createdAt\": \"2026-01-06T07:11:30.850Z\",\n            \"from\": \"849904-2915c491-c32b-4842-b20c-80252d93c748\"\n        },\n        \"uid\": \"1060804-8aa6eb64-f26d-4d22-b353-ea6b83c227a4\"\n    }\n}"
+						}
+					]
+				},
+				{
+					"name": "Add a workspace admin",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "identifierType",
+								"value": "scim",
+								"description": "Use SCIM user IDs instead of Postman user IDs.",
+								"disabled": true
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"roles\": [\n        {\n            \"op\": \"add\",\n            \"path\": \"/user\",\n            \"value\": [\n                {\n                    \"id\": \"{{adminId}}\",\n                    \"role\": \"3\"\n                }\n            ]\n        }\n    ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/workspaces/:workspaceId/roles",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"workspaces",
+								":workspaceId",
+								"roles"
+							],
+							"variable": [
+								{
+									"key": "workspaceId",
+									"value": "{{workspaceId}}",
+									"description": "The workspace's ID."
+								}
+							]
+						},
+						"description": "Updates the roles of users or [user groups](https://learning.postman.com/docs/collaborating-in-postman/user-groups/) in a workspace. To get a list of roles, use the [GET /workspace-roles](https://www.postman.com/postman/workspace/postman-public-workspace/request/12959542-f4250b7c-87a6-46ba-a58b-02081131a67c) endpoint.\n\n**Note:**\n\n- Groups are available on Postman [Enterprise plans](https://www.postman.com/pricing).\n    \n- To use SCIM IDs, include the `identifierType=scim` header when you call this endpoint. To get SCIM user IDs, use the `include=scim` query parameter when calling the [GET /workspaces/{workspaceId}](https://www.postman.com/postman/workspace/postman-public-workspace/request/12959542-3a56b6f8-8d0c-410f-a933-03e26589c742?ctx=documentation) or [GET /workspaces](https://www.postman.com/postman/workspace/postman-public-workspace/request/12959542-f027a0fa-9012-4654-a65d-2b751a3154a9) endpoints.\n    \n- You cannot set roles for users in personal and partner workspaces.\n    \n- This endpoint does not support the external [Partner or Guest roles](https://learning.postman.com/docs/collaborating-in-postman/roles-and-permissions/#team-roles).\n    \n- This endpoint is restricted to 50 operations per call.\n    \n- The request body must contain one unique action per user or user group. For example, you cannot add and remove multiple roles for a user in the same request body."
+					},
+					"response": [
+						{
+							"name": "200",
+							"originalRequest": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "identifierType",
+										"value": "scim",
+										"description": "Use SCIM user IDs instead of Postman user IDs.",
+										"disabled": true
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"roles\": [\n        {\n            \"op\": \"add\",\n            \"path\": \"/user\",\n            \"value\": [\n                {\n                    \"id\": \"1060804\",\n                    \"role\": \"3\"\n                }\n            ]\n        }\n    ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/workspaces/:workspaceId/roles",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"workspaces",
+										":workspaceId",
+										"roles"
+									],
+									"variable": [
+										{
+											"key": "workspaceId",
+											"value": "{{workspaceId}}",
+											"description": "The workspace's ID."
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Date",
+									"value": "Tue, 06 Jan 2026 10:00:28 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "gzip"
+								},
+								{
+									"key": "x-ratelimit-limit",
+									"value": "300"
+								},
+								{
+									"key": "x-ratelimit-remaining",
+									"value": "299"
+								},
+								{
+									"key": "x-ratelimit-reset",
+									"value": "60"
+								},
+								{
+									"key": "ratelimit-limit",
+									"value": "300"
+								},
+								{
+									"key": "ratelimit-remaining",
+									"value": "299"
+								},
+								{
+									"key": "ratelimit-reset",
+									"value": "60"
+								},
+								{
+									"key": "ratelimit",
+									"value": "limit=300, remaining=299, reset=60"
+								},
+								{
+									"key": "ratelimit-policy",
+									"value": "300;w=60"
+								},
+								{
+									"key": "vary",
+									"value": "Origin"
+								},
+								{
+									"key": "content-security-policy",
+									"value": "default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';img-src 'self' data:;object-src 'none';script-src 'self';script-src-attr 'none';style-src 'self' https: 'unsafe-inline';upgrade-insecure-requests"
+								},
+								{
+									"key": "cross-origin-opener-policy",
+									"value": "same-origin"
+								},
+								{
+									"key": "cross-origin-resource-policy",
+									"value": "same-origin"
+								},
+								{
+									"key": "origin-agent-cluster",
+									"value": "?1"
+								},
+								{
+									"key": "referrer-policy",
+									"value": "same-origin"
+								},
+								{
+									"key": "strict-transport-security",
+									"value": "max-age=31536000; includeSubDomains"
+								},
+								{
+									"key": "x-content-type-options",
+									"value": "nosniff"
+								},
+								{
+									"key": "x-dns-prefetch-control",
+									"value": "off"
+								},
+								{
+									"key": "x-download-options",
+									"value": "noopen"
+								},
+								{
+									"key": "x-frame-options",
+									"value": "DENY"
+								},
+								{
+									"key": "x-permitted-cross-domain-policies",
+									"value": "none"
+								},
+								{
+									"key": "x-xss-protection",
+									"value": "0"
+								},
+								{
+									"key": "x-nr-trace-id",
+									"value": "b62d7007caf1428b4f278425d08fea4d"
+								},
+								{
+									"key": "x-envoy-upstream-service-time",
+									"value": "466"
+								},
+								{
+									"key": "access-control-allow-origin",
+									"value": "*"
+								},
+								{
+									"key": "access-control-allow-methods",
+									"value": "GET,POST,PUT,DELETE"
+								},
+								{
+									"key": "access-control-max-age",
+									"value": "5"
+								},
+								{
+									"key": "access-control-expose-headers",
+									"value": "*"
+								},
+								{
+									"key": "access-control-allow-headers",
+									"value": "Accept,X-Api-Key,Content-Type"
+								},
+								{
+									"key": "x-ratelimit-limit-month",
+									"value": "1000000"
+								},
+								{
+									"key": "x-ratelimit-remaining-month",
+									"value": "999977"
+								},
+								{
+									"key": "ratelimit-limit-month",
+									"value": "1000000"
+								},
+								{
+									"key": "ratelimit-remaining-month",
+									"value": "999977"
+								},
+								{
+									"key": "cf-cache-status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Set-Cookie",
+									"value": "__cf_bm=izksMLKMbQt9RLBD3_Xo4MbqtWhvDxGz74ZtSF250RI-1767693628-1.0.1.1-irVIb.VvYCKgm.04nJ1hN5pPbEUOYJhpBzWGhO6SRha_zyzs0WpzBSYiErLpclGIPCzvf9RLfSLseRoFyqITlgxwktyWJCERXcIyeG34r1s; path=/; expires=Tue, 06-Jan-26 10:30:28 GMT; domain=.getpostman-beta.com; HttpOnly; Secure; SameSite=None"
+								},
+								{
+									"key": "Set-Cookie",
+									"value": "_cfuvid=8fTJz1ARMoD5ENu7lDC5Hwe6HFAiQTaSJD5C3Mcuo8g-1767693628486-0.0.1.1-604800000; path=/; domain=.getpostman-beta.com; HttpOnly; Secure; SameSite=None"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "9b9a5e52be2a3c0d-BLR"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"roles\": [\n        {\n            \"id\": \"3\",\n            \"user\": [\n                \"1060804\"\n            ],\n            \"displayName\": \"Admin\"\n        }\n    ]\n}"
+						}
+					]
+				},
+				{
+					"name": "Invite a partner",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"action\": \"invite_partner\",\n    \"targetEntity\" : \"workspace\",\n    \"targetEntityId\": \"{{workspaceId}}\",\n    \"roleId\": \"4\",\n    \"target\": {\n        \"emails\": [\n            \"{{partnerEmail}}\"\n        ]\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/invitations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"invitations"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "200",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"action\": \"invite_partner\",\n    \"targetEntity\" : \"workspace\",\n    \"targetEntityId\": \"{{workspaceId}}\",\n    \"roleId\": \"7\",\n    \"target\": {\n        \"emails\": [\n            \"hemendra.kumar+teambeta360T1P360@postman.com\"\n        ]\n    }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/invitations",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"invitations"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Date",
+									"value": "Tue, 06 Jan 2026 10:01:18 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "gzip"
+								},
+								{
+									"key": "x-ratelimit-limit",
+									"value": "300"
+								},
+								{
+									"key": "x-ratelimit-remaining",
+									"value": "297"
+								},
+								{
+									"key": "x-ratelimit-reset",
+									"value": "10"
+								},
+								{
+									"key": "ratelimit-limit",
+									"value": "300"
+								},
+								{
+									"key": "ratelimit-remaining",
+									"value": "297"
+								},
+								{
+									"key": "ratelimit-reset",
+									"value": "10"
+								},
+								{
+									"key": "ratelimit",
+									"value": "limit=300, remaining=297, reset=10"
+								},
+								{
+									"key": "ratelimit-policy",
+									"value": "300;w=60"
+								},
+								{
+									"key": "vary",
+									"value": "Accept-Encoding"
+								},
+								{
+									"key": "x-envoy-upstream-service-time",
+									"value": "886"
+								},
+								{
+									"key": "access-control-allow-origin",
+									"value": "*"
+								},
+								{
+									"key": "access-control-allow-methods",
+									"value": "GET,POST,PUT,DELETE"
+								},
+								{
+									"key": "access-control-max-age",
+									"value": "5"
+								},
+								{
+									"key": "access-control-expose-headers",
+									"value": "*"
+								},
+								{
+									"key": "access-control-allow-headers",
+									"value": "Accept,X-Api-Key,Content-Type"
+								},
+								{
+									"key": "x-ratelimit-limit-month",
+									"value": "1000000"
+								},
+								{
+									"key": "x-ratelimit-remaining-month",
+									"value": "999975"
+								},
+								{
+									"key": "ratelimit-limit-month",
+									"value": "1000000"
+								},
+								{
+									"key": "ratelimit-remaining-month",
+									"value": "999975"
+								},
+								{
+									"key": "cf-cache-status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "9b9a5f8b2cb53c0d-BLR"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"results\": [\n        {\n            \"email\": \"hemendra.kumar+teambeta360T1P360@postman.com\",\n            \"status\": \"EMAIL_SENT\",\n            \"invitationLink\": \"https://app.getpostman-beta.com/invite-signup?invite_code=6316f8fe781f8f955e9741ce54fb779e330694a4258264352e22be58b4e1c77b\"\n        }\n    ],\n    \"roleId\": \"7\",\n    \"roleDisplayName\": \"Editor and Partner Lead\",\n    \"targetEntityId\": \"a6ce8ac9-0090-4089-9e4e-86d7d877d432\",\n    \"action\": \"invite_partner\",\n    \"targetEntity\": \"workspace\"\n}"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Update Partner Role",
+			"item": [
+				{
+					"name": "Get Workspace Roles",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Parse the JSON response",
+									"const jsonData = pm.response.json();",
+									"",
+									"// Find the role object that has a \"partner\" array",
+									"const partnerRole = jsonData.roles.find(role => role.partner && role.partner.length > 0);",
+									"",
+									"if (partnerRole) {",
+									"    // Extract the partnerId (first element of the partner array)",
+									"    const partnerId = partnerRole.partner[0];",
+									"    ",
+									"    // Extract the roleId from the role object's \"id\" field",
+									"    const currentRoleId = partnerRole.id;",
+									"    ",
+									"    // Set as environment variables",
+									"    pm.environment.set(\"partnerUserId\", partnerId);",
+									"    pm.environment.set(\"currentRoleId\", currentRoleId);",
+									"    ",
+									"    // Log the extracted values for verification",
+									"    console.log(\"Partner ID extracted:\", partnerId);",
+									"    console.log(\"Current Role ID extracted:\", currentRoleId);",
+									"    console.log(\"Variables set successfully!\");",
+									"} else {",
+									"    console.log(\"No partner role found in the response\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/workspaces/{{workspaceId}}/roles",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"workspaces",
+								"{{workspaceId}}",
+								"roles"
+							]
+						},
+						"description": "Gets all roles assigned in a workspace. Returns userId of partners and their role IDs."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Partner Role",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{x-api-key}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"roles\": [\n        {\n            \"op\": \"add\",\n            \"path\": \"/partner\",\n            \"value\": [\n                {\n                    \"id\": \"{{partnerUserId}}\",\n                    \"role\": \"7\"\n                }\n            ]\n        },\n        {\n            \"op\": \"remove\",\n            \"path\": \"/partner\",\n            \"value\": [\n                {\n                    \"id\": \"{{partnerUserId}}\",\n                    \"role\": \"{{currentRoleId}}\"\n                }\n            ]\n        }\n    ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/workspaces/{{workspaceId}}/roles",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"workspaces",
+								"{{workspaceId}}",
+								"roles"
+							]
+						},
+						"description": "Updates a partner's role in the workspace. Removes the old role and adds the new role (7). Requires partnerId and currentRoleId from the previous requests."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Deprovisioning",
+			"item": [
+				{
+					"name": "Re-invite a partner- get userId",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Get the partner email from environment variable",
+									"const partnerEmail = pm.environment.get(\"partnerEmail\");",
+									"",
+									"// Parse the JSON response",
+									"const jsonData = pm.response.json();",
+									"",
+									"// Search through results array to find the matching email",
+									"if (jsonData.results && Array.isArray(jsonData.results)) {",
+									"    const matchingResult = jsonData.results.find(result => result.email === partnerEmail);",
+									"    ",
+									"    if (matchingResult && matchingResult.userId) {",
+									"        pm.environment.set(\"partnerUserId\", matchingResult.userId);",
+									"        console.log(\"partnerUserId set to:\", matchingResult.userId);",
+									"    } else {",
+									"        console.log(\"No matching result found for email:\", partnerEmail);",
+									"    }",
+									"} else {",
+									"    console.log(\"Results array not found in response\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"action\": \"invite_partner\",\n    \"targetEntity\" : \"workspace\",\n    \"targetEntityId\": \"{{workspaceId}}\",\n    \"roleId\": \"7\",\n    \"target\": {\n        \"emails\": [\n            \"{{partnerEmail}}\"\n        ]\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/invitations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"invitations"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "200 re-invite",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"action\": \"invite_partner\",\n    \"targetEntity\" : \"workspace\",\n    \"targetEntityId\": \"{{workspaceId}}\",\n    \"roleId\": \"7\",\n    \"target\": {\n        \"emails\": [\n            \"hemendra.kumar+teambeta360T1P360@postman.com\"\n        ]\n    }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/invitations",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"invitations"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": null,
+							"header": [
+								{
+									"key": "Date",
+									"value": "Tue, 06 Jan 2026 10:17:20 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "gzip"
+								},
+								{
+									"key": "x-ratelimit-limit",
+									"value": "300"
+								},
+								{
+									"key": "x-ratelimit-remaining",
+									"value": "299"
+								},
+								{
+									"key": "x-ratelimit-reset",
+									"value": "60"
+								},
+								{
+									"key": "ratelimit-limit",
+									"value": "300"
+								},
+								{
+									"key": "ratelimit-remaining",
+									"value": "299"
+								},
+								{
+									"key": "ratelimit-reset",
+									"value": "60"
+								},
+								{
+									"key": "ratelimit",
+									"value": "limit=300, remaining=299, reset=60"
+								},
+								{
+									"key": "ratelimit-policy",
+									"value": "300;w=60"
+								},
+								{
+									"key": "vary",
+									"value": "Accept-Encoding"
+								},
+								{
+									"key": "x-envoy-upstream-service-time",
+									"value": "1169"
+								},
+								{
+									"key": "access-control-allow-origin",
+									"value": "*"
+								},
+								{
+									"key": "access-control-allow-methods",
+									"value": "GET,POST,PUT,DELETE"
+								},
+								{
+									"key": "access-control-max-age",
+									"value": "5"
+								},
+								{
+									"key": "access-control-expose-headers",
+									"value": "*"
+								},
+								{
+									"key": "access-control-allow-headers",
+									"value": "Accept,X-Api-Key,Content-Type"
+								},
+								{
+									"key": "x-ratelimit-limit-month",
+									"value": "1000000"
+								},
+								{
+									"key": "x-ratelimit-remaining-month",
+									"value": "999972"
+								},
+								{
+									"key": "ratelimit-limit-month",
+									"value": "1000000"
+								},
+								{
+									"key": "ratelimit-remaining-month",
+									"value": "999972"
+								},
+								{
+									"key": "cf-cache-status",
+									"value": "DYNAMIC"
+								},
+								{
+									"key": "Set-Cookie",
+									"value": "__cf_bm=auAU1vXIm_NTZupgQYppm9ba4pjqQHXrNNevShFC6r8-1767694640-1.0.1.1-.dlHezRV2e8U3FhH12_5RSgWSrJ05rIHbgt0_ioDQQ3NRtZTTsIujHbi7nFP7JF5ZMv948d5G1Rhi2Y9hfJ66ndeFFB53ow83W2bp4.eKUY; path=/; expires=Tue, 06-Jan-26 10:47:20 GMT; domain=.getpostman-beta.com; HttpOnly; Secure; SameSite=None"
+								},
+								{
+									"key": "Server",
+									"value": "cloudflare"
+								},
+								{
+									"key": "CF-RAY",
+									"value": "9b9a77020f353c0d-BLR"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"results\": [\n        {\n            \"message\": \"Partner added to workspace\",\n            \"email\": \"hemendra.kumar+teambeta360T1P360@postman.com\",\n            \"status\": \"PARTNER_ADDED\",\n            \"userId\": 1410532\n        }\n    ],\n    \"roleDisplayName\": \"Editor and Partner Lead\",\n    \"roleId\": \"7\",\n    \"targetEntityId\": \"a6ce8ac9-0090-4089-9e4e-86d7d877d432\",\n    \"action\": \"invite_partner\",\n    \"targetEntity\": \"workspace\"\n}"
+						}
+					]
+				},
+				{
+					"name": "Remove a partner",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"action\": \"remove_partner\",\n    \"targetEntity\": \"workspace\",\n    \"targetEntityId\": \"{{workspaceId}}\",\n    \"target\": {\n        \"userIds\": [\n            \"{{partnerUserId}}\"\n        ]\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/invitations",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"invitations"
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "Remove a partner from a workspace",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"action\": \"remove_partner\",\n    \"targetEntity\": \"workspace\",\n    \"targetEntityId\": \"58dba5ca-465f-41b0-a203-9ce5cf7c5ee1\",\n    \"target\": {\n        \"userIds\": [\n            \"1173992\"\n        ]\n    }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/invitations",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"invitations"
+									]
+								}
+							},
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json",
+									"description": "",
+									"type": "text"
+								}
+							],
+							"cookie": [
+								{
+									"expires": "Invalid Date",
+									"domain": "",
+									"path": ""
+								}
+							],
+							"body": "{\n    \"action\": \"remove_partner\",\n    \"targetEntity\": \"workspace\",\n    \"targetEntityId\": \"58dba5ca-465f-41b0-a203-9ce5cf7c5ee1\",\n    \"results\": [\n        {\n            \"userId\": \"1173992\",\n            \"status\": \"REMOVED\"\n        }\n    ]\n}"
+						},
+						{
+							"name": "Remove a partner from the team",
+							"originalRequest": {
+								"method": "POST",
+								"header": [],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"action\": \"remove_partner\",\n    \"targetEntity\": \"team\",\n    \"targetEntityId\": \"publisher_team_id\",\n    \"target\": {\n        \"userIds\": [\n            \"1173992\"\n        ]\n    }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/invitations",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"invitations"
+									]
+								}
+							},
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json",
+									"description": "",
+									"type": "text"
+								}
+							],
+							"cookie": [
+								{
+									"expires": "Invalid Date",
+									"domain": "",
+									"path": ""
+								}
+							],
+							"body": "{\n    \"action\": \"remove_partner\",\n    \"targetEntity\": \"team\",\n    \"targetEntityId\": \"publisher_team_id\",\n    \"results\": [\n        {\n            \"userId\": \"1173992\",\n            \"status\": \"REMOVED\"\n        }\n    ]\n}"
+						}
+					]
+				}
+			]
+		}
+	],
+	"auth": {
+		"type": "apikey",
+		"apikey": [
+			{
+				"key": "value",
+				"value": "{{x-api-key}}",
+				"type": "string"
+			},
+			{
+				"key": "key",
+				"value": "x-api-key",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}

@@ -4,8 +4,8 @@
   "description": "Automated Postman partner workspace provisioning and reset scripts",
   "type": "module",
   "scripts": {
-    "provision": "node provision.js",
-    "reset": "node reset.js",
+    "provision": "node cli/provision.js",
+    "reset": "node cli/reset.js",
     "provision:help": "echo 'Usage: npm run provision -- --name \"Workspace Name\"'",
     "reset:help": "echo 'Usage: npm run reset -- --workspace-id \"workspace-id\" --confirm'"
   },
