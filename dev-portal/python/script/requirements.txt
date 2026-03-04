@@ -1,0 +1,2 @@
+# Minimal dependency for postman_service.py (standalone use)
+httpx>=0.25.0
