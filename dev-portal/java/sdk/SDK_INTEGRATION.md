@@ -11,7 +11,7 @@ All methods assume:
 - **Java 17** or later is installed
 - **Maven 3.6+** is available (the SDK uses Maven as its build system)
 - You have cloned this repository locally
-- You know the absolute or relative path from your consuming project to `dev-portal/java/`
+- You know the absolute or relative path from your consuming project to `dev-portal/java/sdk/`
 
 The SDK is built on **Spring Boot 3.2.2** and uses **Spring WebFlux** for reactive HTTP. Key runtime dependencies:
 
@@ -45,7 +45,7 @@ Installs the SDK JAR into your local Maven repository (`~/.m2/repository`) so an
 ### Step 1 — Build and install to local `.m2`
 
 ```bash
-cd dev-portal/java
+cd dev-portal/java/sdk
 mvn clean install
 ```
 
@@ -114,7 +114,7 @@ public class WorkspaceManager {
 
 ```bash
 # Rebuild and reinstall
-cd dev-portal/java
+cd dev-portal/java/sdk
 mvn clean install
 
 # In your consuming project, reimport dependencies
@@ -138,7 +138,7 @@ Points your consuming project's dependency directly at a local JAR file using Ma
 ### Step 1 — Build the SDK JAR
 
 ```bash
-cd dev-portal/java
+cd dev-portal/java/sdk
 mvn clean package -DskipTests
 ```
 
@@ -154,14 +154,14 @@ In your consuming project's `pom.xml`:
     <artifactId>postman-sdk</artifactId>
     <version>1.0.0</version>
     <scope>system</scope>
-    <systemPath>${project.basedir}/../relative/path/to/dev-portal/java/target/postman-sdk-1.0.0.jar</systemPath>
+    <systemPath>${project.basedir}/../relative/path/to/dev-portal/java/sdk/target/postman-sdk-1.0.0.jar</systemPath>
 </dependency>
 ```
 
 Or use an absolute path:
 
 ```xml
-<systemPath>/absolute/path/to/dev-portal/java/target/postman-sdk-1.0.0.jar</systemPath>
+<systemPath>/absolute/path/to/dev-portal/java/sdk/target/postman-sdk-1.0.0.jar</systemPath>
 ```
 
 ### Step 3 — Add transitive dependencies manually
@@ -207,7 +207,7 @@ If your project already uses Spring Boot with the same parent, most of these wil
 
 ```bash
 # Rebuild the JAR
-cd dev-portal/java
+cd dev-portal/java/sdk
 mvn clean package -DskipTests
 
 # Your consuming project picks up the new JAR on next compile
@@ -230,7 +230,7 @@ Creates a file-based Maven repository inside your consuming project and installs
 ### Step 1 — Build the SDK
 
 ```bash
-cd dev-portal/java
+cd dev-portal/java/sdk
 mvn clean package -DskipTests
 ```
 
@@ -241,7 +241,7 @@ cd /path/to/your-project
 
 mvn deploy:deploy-file \
   -Durl=file://$(pwd)/repo \
-  -Dfile=/path/to/dev-portal/java/target/postman-sdk-1.0.0.jar \
+  -Dfile=/path/to/dev-portal/java/sdk/target/postman-sdk-1.0.0.jar \
   -DgroupId=com.postman \
   -DartifactId=postman-sdk \
   -Dversion=1.0.0 \
@@ -305,14 +305,14 @@ Since the generated POM doesn't include the SDK's dependencies, you need to decl
 
 ```bash
 # Rebuild the SDK
-cd dev-portal/java
+cd dev-portal/java/sdk
 mvn clean package -DskipTests
 
 # Re-deploy to the local repo
 cd /path/to/your-project
 mvn deploy:deploy-file \
   -Durl=file://$(pwd)/repo \
-  -Dfile=/path/to/dev-portal/java/target/postman-sdk-1.0.0.jar \
+  -Dfile=/path/to/dev-portal/java/sdk/target/postman-sdk-1.0.0.jar \
   -DgroupId=com.postman \
   -DartifactId=postman-sdk \
   -Dversion=1.0.0 \
@@ -343,7 +343,7 @@ Copies the built JAR directly into your project and configures the build tool to
 ### Step 1 — Build the SDK JAR
 
 ```bash
-cd dev-portal/java
+cd dev-portal/java/sdk
 mvn clean package -DskipTests
 ```
 
@@ -351,7 +351,7 @@ mvn clean package -DskipTests
 
 ```bash
 mkdir -p /path/to/your-project/lib
-cp dev-portal/java/target/postman-sdk-1.0.0.jar /path/to/your-project/lib/
+cp dev-portal/java/sdk/target/postman-sdk-1.0.0.jar /path/to/your-project/lib/
 ```
 
 Your project structure:
@@ -412,11 +412,11 @@ To include the system-scoped JAR in your Spring Boot fat JAR:
 
 ```bash
 # Rebuild
-cd dev-portal/java
+cd dev-portal/java/sdk
 mvn clean package -DskipTests
 
 # Recopy
-cp dev-portal/java/target/postman-sdk-1.0.0.jar /path/to/your-project/lib/
+cp dev-portal/java/sdk/target/postman-sdk-1.0.0.jar /path/to/your-project/lib/
 ```
 
 ### Caveats
@@ -436,7 +436,7 @@ Copies the raw Java source files into your project so they are compiled alongsid
 ```bash
 mkdir -p /path/to/your-project/src/main/java/com/postman/sdk
 
-cp -r dev-portal/java/src/main/java/com/postman/sdk/* \
+cp -r dev-portal/java/sdk/src/main/java/com/postman/sdk/* \
   /path/to/your-project/src/main/java/com/postman/sdk/
 ```
 
@@ -596,7 +596,7 @@ public class WorkspaceManager {
 Simply recopy the source files:
 
 ```bash
-cp -r dev-portal/java/src/main/java/com/postman/sdk/* \
+cp -r dev-portal/java/sdk/src/main/java/com/postman/sdk/* \
   /path/to/your-project/src/main/java/com/postman/sdk/
 ```
 

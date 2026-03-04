@@ -524,10 +524,11 @@ node -e "require('dotenv').config(); console.log({
 ## Related Documentation
 
 - [Main README](../README.md) - Project overview and SDK comparison
-- [JavaScript SDK](../dev-portal/javascript/README.md) - For web application integration
-- [TypeScript SDK](../dev-portal/typescript/README.md) - Type-safe SDK for TypeScript projects
-- [Python SDK](../dev-portal/python/README.md) - Async Python SDK with Pydantic models
-- [Java SDK](../dev-portal/java/README.md) - Spring Boot reactive SDK
+- [Dev Portal Overview](../dev-portal/README.md) - Scripts and SDK directory overview
+- [JavaScript SDK](../dev-portal/javascript/sdk/README.md) - For web application integration
+- [TypeScript SDK](../dev-portal/typescript/sdk/README.md) - Type-safe SDK for TypeScript projects
+- [Python SDK](../dev-portal/python/sdk/README.md) - Async Python SDK with Pydantic models
+- [Java SDK](../dev-portal/java/sdk/README.md) - Spring Boot reactive SDK
 
 ---
 

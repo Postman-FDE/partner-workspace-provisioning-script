@@ -10,7 +10,7 @@ All methods assume:
 
 - **Node.js >= 18.0.0** is installed
 - You have cloned this repository locally
-- You know the absolute or relative path from your consuming project to `dev-portal/typescript/`
+- You know the absolute or relative path from your consuming project to `dev-portal/typescript/sdk/`
 
 The SDK's only runtime dependency is **`axios ^1.6.0`**. Methods 1–3 handle this automatically via npm; Methods 4–5 require you to install it manually.
 
@@ -35,7 +35,7 @@ Creates a global symlink so your consuming project resolves `@postman/sdk` to th
 ### Step 1 — Build and register the SDK globally
 
 ```bash
-cd dev-portal/typescript
+cd dev-portal/typescript/sdk
 npm install
 npm run build
 npm link
@@ -50,7 +50,7 @@ cd /path/to/your-project
 npm link @postman/sdk
 ```
 
-npm creates a symlink at `your-project/node_modules/@postman/sdk` → `dev-portal/typescript/`.
+npm creates a symlink at `your-project/node_modules/@postman/sdk` → `dev-portal/typescript/sdk/`.
 
 ### Step 3 — Import and use
 
@@ -67,7 +67,7 @@ const { valid, user } = await client.validateApiKey();
 For a live development loop, run the SDK in watch mode in a separate terminal:
 
 ```bash
-cd dev-portal/typescript
+cd dev-portal/typescript/sdk
 npm run dev
 ```
 
@@ -80,7 +80,7 @@ npm run dev
 npm unlink @postman/sdk
 
 # Remove the global registration
-cd dev-portal/typescript
+cd dev-portal/typescript/sdk
 npm unlink
 ```
 
@@ -99,7 +99,7 @@ Points your consuming project's dependency directly at the local SDK folder usin
 ### Step 1 — Build the SDK
 
 ```bash
-cd dev-portal/typescript
+cd dev-portal/typescript/sdk
 npm install
 npm run build
 ```
@@ -138,7 +138,7 @@ After making changes to the SDK source:
 
 ```bash
 # Rebuild the SDK
-cd dev-portal/typescript
+cd dev-portal/typescript/sdk
 npm run build
 
 # Re-install in consuming project to pick up changes
@@ -168,19 +168,19 @@ Builds a `.tgz` tarball identical to what `npm publish` would produce, then inst
 ### Step 1 — Build and pack the SDK
 
 ```bash
-cd dev-portal/typescript
+cd dev-portal/typescript/sdk
 npm install
 npm run build
 npm pack
 ```
 
-This produces a file named `postman-sdk-1.0.0.tgz` in the `dev-portal/typescript/` directory.
+This produces a file named `postman-sdk-1.0.0.tgz` in the `dev-portal/typescript/sdk/` directory.
 
 ### Step 2 — Install the tarball in your consuming project
 
 ```bash
 cd /path/to/your-project
-npm install ../relative/path/to/dev-portal/typescript/postman-sdk-1.0.0.tgz
+npm install ../relative/path/to/dev-portal/typescript/sdk/postman-sdk-1.0.0.tgz
 ```
 
 This installs `@postman/sdk` and its dependency (`axios`) into `node_modules`, exactly as if it came from the npm registry.
@@ -198,13 +198,13 @@ const workspaces = await client.getWorkspaces();
 
 ```bash
 # Rebuild and repack
-cd dev-portal/typescript
+cd dev-portal/typescript/sdk
 npm run build
 npm pack
 
 # Reinstall in consuming project
 cd /path/to/your-project
-npm install ../relative/path/to/dev-portal/typescript/postman-sdk-1.0.0.tgz
+npm install ../relative/path/to/dev-portal/typescript/sdk/postman-sdk-1.0.0.tgz
 ```
 
 ### Why use this method?
@@ -232,7 +232,7 @@ Copies the compiled SDK output directly into your project as a vendored dependen
 ### Step 1 — Build the SDK
 
 ```bash
-cd dev-portal/typescript
+cd dev-portal/typescript/sdk
 npm install
 npm run build
 ```
@@ -245,8 +245,8 @@ Copy the required files into a `lib/` directory (or any location you prefer):
 mkdir -p /path/to/your-project/lib/postman-sdk
 
 # Copy the compiled output and package.json
-cp -r dev-portal/typescript/dist /path/to/your-project/lib/postman-sdk/
-cp dev-portal/typescript/package.json /path/to/your-project/lib/postman-sdk/
+cp -r dev-portal/typescript/sdk/dist /path/to/your-project/lib/postman-sdk/
+cp dev-portal/typescript/sdk/package.json /path/to/your-project/lib/postman-sdk/
 ```
 
 Your consuming project should now have:
@@ -318,11 +318,11 @@ import { PostmanClient } from '@postman/sdk';
 
 ```bash
 # Rebuild
-cd dev-portal/typescript
+cd dev-portal/typescript/sdk
 npm run build
 
 # Recopy
-cp -r dev-portal/typescript/dist /path/to/your-project/lib/postman-sdk/
+cp -r dev-portal/typescript/sdk/dist /path/to/your-project/lib/postman-sdk/
 ```
 
 ### Caveats
@@ -342,7 +342,7 @@ Copies the raw TypeScript source files into your project so they are compiled al
 ```bash
 mkdir -p /path/to/your-project/lib/postman-sdk
 
-cp -r dev-portal/typescript/src/* /path/to/your-project/lib/postman-sdk/
+cp -r dev-portal/typescript/sdk/src/* /path/to/your-project/lib/postman-sdk/
 ```
 
 Your consuming project should now have:
@@ -429,7 +429,7 @@ console.log(`Provisioned workspace: ${result.workspaceId}`);
 Simply recopy the source files:
 
 ```bash
-cp -r dev-portal/typescript/src/* /path/to/your-project/lib/postman-sdk/
+cp -r dev-portal/typescript/sdk/src/* /path/to/your-project/lib/postman-sdk/
 ```
 
 Or, if you've made local modifications, manually merge the changes.

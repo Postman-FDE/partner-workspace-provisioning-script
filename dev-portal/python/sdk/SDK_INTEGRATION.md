@@ -11,7 +11,7 @@ All methods assume:
 - **Python >= 3.10** is installed
 - **pip** (or an alternative like `uv`, `poetry`) is available
 - You have cloned this repository locally
-- You know the absolute or relative path from your consuming project to `dev-portal/python/`
+- You know the absolute or relative path from your consuming project to `dev-portal/python/sdk/`
 
 The SDK has two runtime dependencies: **`httpx >=0.25.0`** and **`pydantic >=2.5.0`**. Methods 1–3 handle these automatically via pip; Methods 4–5 require you to install them manually.
 
@@ -69,7 +69,7 @@ asyncio.run(main())
 
 ### Step 4 — Iterate
 
-Any changes you make to the SDK source files in `dev-portal/python/postman_sdk/` are reflected immediately — no reinstall needed. This is the fastest feedback loop.
+Any changes you make to the SDK source files in `dev-portal/python/sdk/postman_sdk/` are reflected immediately — no reinstall needed. This is the fastest feedback loop.
 
 ### Installing dev dependencies (optional)
 
@@ -181,7 +181,7 @@ pip install build
 ### Step 2 — Build the wheel
 
 ```bash
-cd dev-portal/python
+cd dev-portal/python/sdk
 python -m build
 ```
 
@@ -197,7 +197,7 @@ dist/
 
 ```bash
 cd /path/to/your-project
-pip install /path/to/dev-portal/python/dist/postman_sdk-1.0.0-py3-none-any.whl
+pip install /path/to/dev-portal/python/sdk/dist/postman_sdk-1.0.0-py3-none-any.whl
 ```
 
 This installs `postman-sdk` and its dependencies (`httpx`, `pydantic`) into your environment, exactly as if it came from PyPI.
@@ -212,12 +212,12 @@ from postman_sdk import PostmanClient, ProvisioningService, WorkspaceService
 
 ```bash
 # Rebuild the wheel
-cd dev-portal/python
+cd dev-portal/python/sdk
 python -m build
 
 # Reinstall in consuming project
 cd /path/to/your-project
-pip install /path/to/dev-portal/python/dist/postman_sdk-1.0.0-py3-none-any.whl --force-reinstall
+pip install /path/to/dev-portal/python/sdk/dist/postman_sdk-1.0.0-py3-none-any.whl --force-reinstall
 ```
 
 ### Why use this method?
@@ -341,14 +341,14 @@ Copies the raw Python source files into your project. No build step, no packagin
 ### Step 1 — Copy the SDK source
 
 ```bash
-cp -r dev-portal/python/postman_sdk /path/to/your-project/
+cp -r dev-portal/python/sdk/postman_sdk /path/to/your-project/
 ```
 
 Or place it in a subdirectory:
 
 ```bash
 mkdir -p /path/to/your-project/lib
-cp -r dev-portal/python/postman_sdk /path/to/your-project/lib/
+cp -r dev-portal/python/sdk/postman_sdk /path/to/your-project/lib/
 ```
 
 Your consuming project should now have:
@@ -419,7 +419,7 @@ Ensure your consuming project runs on Python 3.10 or later.
 Simply recopy the source:
 
 ```bash
-cp -r dev-portal/python/postman_sdk /path/to/your-project/
+cp -r dev-portal/python/sdk/postman_sdk /path/to/your-project/
 ```
 
 Or, if you've made local modifications, manually merge the changes.

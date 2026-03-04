@@ -1,13 +1,16 @@
 # Postman Workspace Provisioning Tools
 
-Comprehensive multi-language SDK tooling for automated Postman partner workspace provisioning and management. Available as SDKs for JavaScript, TypeScript, Python, and Java, plus CLI scripts for manual operations.
+Comprehensive multi-language tooling for automated Postman partner workspace provisioning and management. Available in three modes: **CLI scripts** for interactive terminal use, **drag-and-drop standalone scripts** for quick integration, and **modular SDKs** for embedding into applications.
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Features](#features)
+- [Repository Modes](#repository-modes)
+  - [CLI Scripts](#cli-scripts)
+  - [Dev Portal — Standalone Scripts](#dev-portal--standalone-scripts)
+  - [Dev Portal — SDKs](#dev-portal--sdks)
 - [Available SDKs](#available-sdks)
-- [CLI Version](#cli-version)
 - [Quick Start](#quick-start)
   - [JavaScript](#javascript-quick-start)
   - [TypeScript](#typescript-quick-start)
@@ -17,6 +20,7 @@ Comprehensive multi-language SDK tooling for automated Postman partner workspace
 - [Architecture Overview](#architecture-overview)
 - [Workflow Details](#workflow-details)
 - [Original Source Reference](#original-source-reference)
+- [Project Structure](#project-structure)
 - [License](#license)
 
 ---
@@ -78,14 +82,55 @@ Deletes workspace resources in reverse dependency order:
 
 ---
 
+## Repository Modes
+
+This repository offers three ways to use the Postman provisioning tools, depending on your use case.
+
+### CLI Scripts
+
+Interactive command-line tools for manual workspace provisioning and reset. Run directly from the terminal with prompts and confirmations.
+
+```bash
+npm run provision    # Interactive provisioning
+npm run reset        # Interactive reset
+```
+
+Best for one-off operations, testing, and debugging. See the [CLI documentation](cli/README.md) for full details on both `provision.js` and `reset.js`.
+
+### Dev Portal — Standalone Scripts
+
+Single-file "drag-and-drop" scripts that contain all provisioning logic in one file per language. Copy a script into any project and call its exported functions directly — no package installation or build step required.
+
+| Language | Script | Documentation |
+|----------|--------|---------------|
+| **JavaScript** | [`postmanService.js`](dev-portal/javascript/script/postmanService.js) | [SCRIPT_README](dev-portal/javascript/script/SCRIPT_README.md) |
+| **TypeScript** | [`postmanService.ts`](dev-portal/typescript/script/postmanService.ts) | [SCRIPT_README](dev-portal/typescript/script/SCRIPT_README.md) |
+| **Python** | [`postman_service.py`](dev-portal/python/script/postman_service.py) | [SCRIPT_README](dev-portal/python/script/SCRIPT_README.md) |
+| **Java** | [`PostmanService.java`](dev-portal/java/script/PostmanService.java) | [SCRIPT_README](dev-portal/java/script/SCRIPT_README.md) |
+
+### Dev Portal — SDKs
+
+Modular, fully-packaged SDKs with proper project structure, build tooling, type definitions, and service-layer architecture. Install as a dependency and import into your application.
+
+| Language | Package | Documentation | Integration Guide |
+|----------|---------|---------------|-------------------|
+| **JavaScript** | `@postman/workspace-sdk` | [README](dev-portal/javascript/sdk/README.md) | [SDK_INTEGRATION](dev-portal/javascript/sdk/SDK_INTEGRATION.md) |
+| **TypeScript** | `@postman/workspace-sdk` | [README](dev-portal/typescript/sdk/README.md) | [SDK_INTEGRATION](dev-portal/typescript/sdk/SDK_INTEGRATION.md) |
+| **Python** | `postman-workspace-sdk` | [README](dev-portal/python/sdk/README.md) | [SDK_INTEGRATION](dev-portal/python/sdk/SDK_INTEGRATION.md) |
+| **Java** | `com.postman:workspace-sdk` | [README](dev-portal/java/sdk/README.md) | [SDK_INTEGRATION](dev-portal/java/sdk/SDK_INTEGRATION.md) |
+
+See the [Dev Portal documentation](dev-portal/README.md) for a full comparison of scripts vs SDKs.
+
+---
+
 ## Available SDKs
 
 | Language | Package | Async Support | Framework Integrations | Documentation |
 |----------|---------|---------------|------------------------|---------------|
-| **JavaScript** | `@postman/workspace-sdk` | Promises | React, Vue, Angular, Svelte, Node.js | [README](dev-portal/javascript/README.md) |
-| **TypeScript** | `@postman/workspace-sdk` | Promises | React, Next.js, Vue, Angular, Svelte | [README](dev-portal/typescript/README.md) |
-| **Python** | `postman-workspace-sdk` | async/await | FastAPI, Django, Flask, Streamlit | [README](dev-portal/python/README.md) |
-| **Java** | `com.postman:workspace-sdk` | Reactive (Mono/Flux) | Spring Boot, Thymeleaf, Vaadin | [README](dev-portal/java/README.md) |
+| **JavaScript** | `@postman/workspace-sdk` | Promises | React, Vue, Angular, Svelte, Node.js | [README](dev-portal/javascript/sdk/README.md) |
+| **TypeScript** | `@postman/workspace-sdk` | Promises | React, Next.js, Vue, Angular, Svelte | [README](dev-portal/typescript/sdk/README.md) |
+| **Python** | `postman-workspace-sdk` | async/await | FastAPI, Django, Flask, Streamlit | [README](dev-portal/python/sdk/README.md) |
+| **Java** | `com.postman:workspace-sdk` | Reactive (Mono/Flux) | Spring Boot, Thymeleaf, Vaadin | [README](dev-portal/java/sdk/README.md) |
 
 ### SDK Feature Matrix
 
@@ -102,50 +147,12 @@ Deletes workspace resources in reverse dependency order:
 
 ---
 
-## CLI Version
-
-Command-line tools for interactive workspace management. Best for manual operations and testing.
-
-### Installation
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd fde-pw-creation-script
-
-# Install dependencies
-npm install
-
-# Copy environment template
-cp .env-example .env
-
-# Edit .env with your configuration
-```
-
-### Usage
-
-```bash
-# Provision a workspace
-npm run provision
-
-# Reset a workspace
-npm run reset
-
-# With flags
-node cli/provision.js --yes
-node cli/reset.js --yes --workspace-id "workspace-id"
-```
-
-See the [CLI documentation](cli/README.md) for detailed usage instructions.
-
----
-
 ## Quick Start
 
 ### JavaScript Quick Start
 
 ```bash
-cd dev-portal/javascript
+cd dev-portal/javascript/sdk
 npm install
 ```
 
@@ -156,7 +163,6 @@ const client = new PostmanClient({
   apiKey: process.env.POSTMAN_API_KEY,
 });
 
-// Full provisioning
 const provisioner = new ProvisioningService(client, {
   sourceWorkspaceId: 'source-workspace-id',
   targetWorkspaceName: 'Partner Workspace',
@@ -173,7 +179,7 @@ console.log('Invitation links:', result.invitations.links);
 ### TypeScript Quick Start
 
 ```bash
-cd dev-portal/typescript
+cd dev-portal/typescript/sdk
 npm install
 npm run build
 ```
@@ -198,7 +204,7 @@ const result = await provisioner.provision();
 ### Python Quick Start
 
 ```bash
-cd dev-portal/python
+cd dev-portal/python/sdk
 pip install -e .
 ```
 
@@ -227,7 +233,7 @@ asyncio.run(main())
 ### Java Quick Start
 
 ```bash
-cd dev-portal/java
+cd dev-portal/java/sdk
 mvn install
 ```
 
@@ -260,7 +266,7 @@ public class WorkspaceManager {
 
 ## Configuration
 
-All SDKs use the same environment variables for configuration:
+All SDKs and scripts use the same environment variables for configuration:
 
 ### Required Variables
 
@@ -370,7 +376,7 @@ The reset follows reverse order to handle dependencies:
 
 ### Rate Limiting
 
-All SDKs include automatic delays between API calls:
+All SDKs and scripts include automatic delays between API calls:
 
 | Operation | Delay |
 |-----------|-------|
@@ -385,17 +391,25 @@ All SDKs include automatic delays between API calls:
 
 ## Original Source Reference
 
-The original single-file implementation is preserved in [`postmanService.js`](postmanService.js) for reference and traceability. This file contains all the original API functions before they were modularized into the multi-language SDKs.
+The original single-file implementation is preserved in [`postmanService.js`](postmanService.js) for reference and traceability. This file contains all the original API functions before they were modularized into the multi-language SDKs and standalone scripts.
 
-### Relationship to SDKs
+### Relationship to Dev Portal
 
 ```
 postmanService.js (original)
     │
-    ├── dev-portal/javascript/  (ES Module SDK)
-    ├── dev-portal/typescript/  (TypeScript SDK with types)
-    ├── dev-portal/python/      (Python SDK with Pydantic)
-    └── dev-portal/java/        (Java SDK with Spring)
+    ├── dev-portal/javascript/
+    │     ├── script/    (cleaned-up single-file JS)
+    │     └── sdk/       (ES Module SDK with Rollup)
+    ├── dev-portal/typescript/
+    │     ├── script/    (fully-typed single-file TS)
+    │     └── sdk/       (TypeScript SDK with tsup)
+    ├── dev-portal/python/
+    │     ├── script/    (async single-file Python)
+    │     └── sdk/       (Python SDK with Pydantic)
+    └── dev-portal/java/
+          ├── script/    (Spring WebClient single-file Java)
+          └── sdk/       (Java SDK with Spring Boot)
 ```
 
 ---
@@ -404,17 +418,29 @@ postmanService.js (original)
 
 ```
 fde-pw-creation-script/
-├── cli/                        # CLI scripts
+├── cli/                              # CLI scripts (interactive terminal)
+│   ├── README.md
 │   ├── provision.js
 │   └── reset.js
-├── dev-portal/                 # Multi-language SDKs
-│   ├── javascript/             # JavaScript SDK
-│   ├── typescript/             # TypeScript SDK
-│   ├── python/                 # Python SDK
-│   └── java/                   # Java SDK
-├── postmanService.js           # Original source (preserved)
-├── package.json                # Root package config
-└── README.md                   # This file
+├── dev-portal/                       # Multi-language tools
+│   ├── README.md                     # Dev portal overview
+│   ├── javascript/
+│   │   ├── script/                   # Drag-and-drop standalone script
+│   │   └── sdk/                      # Modular JavaScript SDK
+│   ├── typescript/
+│   │   ├── script/                   # Drag-and-drop standalone script
+│   │   └── sdk/                      # Modular TypeScript SDK
+│   ├── python/
+│   │   ├── script/                   # Drag-and-drop standalone script
+│   │   └── sdk/                      # Modular Python SDK
+│   └── java/
+│       ├── script/                   # Drag-and-drop standalone script
+│       └── sdk/                      # Modular Java SDK
+├── postmanService.js                 # Original source (preserved)
+├── provision.js                      # Root provision entry point
+├── reset.js                          # Root reset entry point
+├── package.json                      # Root package config
+└── README.md                         # This file
 ```
 
 ---

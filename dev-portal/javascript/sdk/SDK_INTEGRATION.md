@@ -10,7 +10,7 @@ All methods assume:
 
 - **Node.js >= 18.0.0** is installed
 - You have cloned this repository locally
-- You know the absolute or relative path from your consuming project to `dev-portal/javascript/`
+- You know the absolute or relative path from your consuming project to `dev-portal/javascript/sdk/`
 
 The SDK has two runtime dependencies: **`axios ^1.6.0`** and **`dotenv ^16.3.1`**. Methods 1–3 handle these automatically via npm; Methods 4–5 require you to install them manually.
 
@@ -35,7 +35,7 @@ Creates a global symlink so your consuming project resolves `@postman/workspace-
 ### Step 1 — Build and register the SDK globally
 
 ```bash
-cd dev-portal/javascript
+cd dev-portal/javascript/sdk
 npm install
 npm run build
 npm link
@@ -50,7 +50,7 @@ cd /path/to/your-project
 npm link @postman/workspace-sdk
 ```
 
-npm creates a symlink at `your-project/node_modules/@postman/workspace-sdk` → `dev-portal/javascript/`.
+npm creates a symlink at `your-project/node_modules/@postman/workspace-sdk` → `dev-portal/javascript/sdk/`.
 
 ### Step 3 — Import and use
 
@@ -76,7 +76,7 @@ const { valid, user } = await validateApiKey();
 For a live development loop, run the SDK in watch mode in a separate terminal:
 
 ```bash
-cd dev-portal/javascript
+cd dev-portal/javascript/sdk
 npm run dev
 ```
 
@@ -89,7 +89,7 @@ Rollup's watch mode will rebuild the `dist/` output on every source change. Your
 npm unlink @postman/workspace-sdk
 
 # Remove the global registration
-cd dev-portal/javascript
+cd dev-portal/javascript/sdk
 npm unlink
 ```
 
@@ -108,7 +108,7 @@ Points your consuming project's dependency directly at the local SDK folder usin
 ### Step 1 — Build the SDK
 
 ```bash
-cd dev-portal/javascript
+cd dev-portal/javascript/sdk
 npm install
 npm run build
 ```
@@ -146,7 +146,7 @@ After making changes to the SDK source:
 
 ```bash
 # Rebuild the SDK
-cd dev-portal/javascript
+cd dev-portal/javascript/sdk
 npm run build
 
 # Re-install in consuming project to pick up changes
@@ -176,19 +176,19 @@ Builds a `.tgz` tarball identical to what `npm publish` would produce, then inst
 ### Step 1 — Build and pack the SDK
 
 ```bash
-cd dev-portal/javascript
+cd dev-portal/javascript/sdk
 npm install
 npm run build
 npm pack
 ```
 
-This produces a file named `postman-workspace-sdk-1.0.0.tgz` in the `dev-portal/javascript/` directory.
+This produces a file named `postman-workspace-sdk-1.0.0.tgz` in the `dev-portal/javascript/sdk/` directory.
 
 ### Step 2 — Install the tarball in your consuming project
 
 ```bash
 cd /path/to/your-project
-npm install ../relative/path/to/dev-portal/javascript/postman-workspace-sdk-1.0.0.tgz
+npm install ../relative/path/to/dev-portal/javascript/sdk/postman-workspace-sdk-1.0.0.tgz
 ```
 
 This installs `@postman/workspace-sdk` and its dependencies (`axios`, `dotenv`) into `node_modules`, exactly as if it came from the npm registry.
@@ -206,13 +206,13 @@ const workspaces = await client.getWorkspaces();
 
 ```bash
 # Rebuild and repack
-cd dev-portal/javascript
+cd dev-portal/javascript/sdk
 npm run build
 npm pack
 
 # Reinstall in consuming project
 cd /path/to/your-project
-npm install ../relative/path/to/dev-portal/javascript/postman-workspace-sdk-1.0.0.tgz
+npm install ../relative/path/to/dev-portal/javascript/sdk/postman-workspace-sdk-1.0.0.tgz
 ```
 
 ### Why use this method?
@@ -240,7 +240,7 @@ Copies the compiled SDK output directly into your project as a vendored dependen
 ### Step 1 — Build the SDK
 
 ```bash
-cd dev-portal/javascript
+cd dev-portal/javascript/sdk
 npm install
 npm run build
 ```
@@ -253,8 +253,8 @@ Copy the required files into a `lib/` directory (or any location you prefer):
 mkdir -p /path/to/your-project/lib/postman-sdk
 
 # Copy the compiled output and package.json
-cp -r dev-portal/javascript/dist /path/to/your-project/lib/postman-sdk/
-cp dev-portal/javascript/package.json /path/to/your-project/lib/postman-sdk/
+cp -r dev-portal/javascript/sdk/dist /path/to/your-project/lib/postman-sdk/
+cp dev-portal/javascript/sdk/package.json /path/to/your-project/lib/postman-sdk/
 ```
 
 Your consuming project should now have:
@@ -294,11 +294,11 @@ const { PostmanClient } = require('./lib/postman-sdk/dist/index.cjs');
 
 ```bash
 # Rebuild
-cd dev-portal/javascript
+cd dev-portal/javascript/sdk
 npm run build
 
 # Recopy
-cp -r dev-portal/javascript/dist /path/to/your-project/lib/postman-sdk/
+cp -r dev-portal/javascript/sdk/dist /path/to/your-project/lib/postman-sdk/
 ```
 
 ### Caveats
@@ -318,7 +318,7 @@ Copies the raw JavaScript source files into your project. No separate build step
 ```bash
 mkdir -p /path/to/your-project/lib/postman-sdk
 
-cp -r dev-portal/javascript/src/* /path/to/your-project/lib/postman-sdk/
+cp -r dev-portal/javascript/sdk/src/* /path/to/your-project/lib/postman-sdk/
 ```
 
 Your consuming project should now have:
@@ -391,7 +391,7 @@ const result = await provisionWorkspace({
 Simply recopy the source files:
 
 ```bash
-cp -r dev-portal/javascript/src/* /path/to/your-project/lib/postman-sdk/
+cp -r dev-portal/javascript/sdk/src/* /path/to/your-project/lib/postman-sdk/
 ```
 
 Or, if you've made local modifications, manually merge the changes.

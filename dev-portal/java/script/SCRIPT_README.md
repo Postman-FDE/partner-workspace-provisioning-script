@@ -95,7 +95,7 @@ implementation 'com.fasterxml.jackson.core:jackson-databind'
 ### Option 2: Use from this repository
 
 ```bash
-cd dev-portal/java
+cd dev-portal/java/sdk
 mvn clean install
 ```
 
