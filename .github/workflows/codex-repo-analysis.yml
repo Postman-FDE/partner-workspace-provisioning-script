@@ -1,0 +1,49 @@
+name: Repo analysis (Codex)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run Codex repo audit
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          output-file: repo-analysis.md
+          sandbox: read-only
+          prompt: |
+            Analyze this repository end-to-end as a whole-repo audit, not as a pull request review.
+
+            Produce a concise, practical markdown report with exactly these sections:
+            ## Executive Summary
+            ## Necessary Changes
+            ## Optional Improvements
+            ## Suggested Diffs
+
+            Requirements:
+            - Focus on this repository's actual code, structure, tooling, and documentation.
+            - In "Necessary Changes", include only concrete changes that are truly needed.
+            - Prefix each necessary change with a priority label: P0, P1, or P2.
+            - Include the relevant file path(s) for every actionable finding.
+            - Distinguish clearly between necessary changes and optional improvements.
+            - In "Suggested Diffs", include fenced diff blocks only for changes that are truly warranted.
+            - If no necessary changes are required, say so explicitly instead of inventing work.
+            - Keep the report concise, specific, and implementation-oriented.
+
+      - name: Add report to job summary
+        run: cat repo-analysis.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-analysis-${{ github.run_number }}
+          path: repo-analysis.md
