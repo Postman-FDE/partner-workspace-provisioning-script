@@ -23,6 +23,11 @@ jobs:
           prompt: |
             Analyze this repository end-to-end as a whole-repo audit, not as a pull request review.
 
+            Repository context:
+            - GitHub repository: ${{ github.repository }}
+            - Commit SHA to link against: ${{ github.sha }}
+            - Repository root inside the runner: ${{ github.workspace }}
+
             Produce a concise, practical markdown report with exactly these sections:
             ## Executive Summary
             ## Necessary Changes
@@ -34,6 +39,9 @@ jobs:
             - In "Necessary Changes", include only concrete changes that are truly needed.
             - Prefix each necessary change with a priority label: P0, P1, or P2.
             - Include the relevant file path(s) for every actionable finding.
+            - Use repository-relative paths only, never runner-local absolute paths such as /home/runner/work/...
+            - For every file reference, include a real GitHub blob link in this exact format:
+              https://github.com/${{ github.repository }}/blob/${{ github.sha }}/<relative-path>
             - Distinguish clearly between necessary changes and optional improvements.
             - In "Suggested Diffs", include fenced diff blocks only for changes that are truly warranted.
             - If no necessary changes are required, say so explicitly instead of inventing work.
