@@ -41,15 +41,27 @@ public class PostmanService {
     private final String postmanApiKey;
     private final String postmanSourceWorkspaceId;
     private final String postmanTargetWorkspaceId;
+    private final String postmanWorkspaceName;
+    private final String postmanAdminUserIds;
+    private final String partnerEmails;
+    private final String partnerRoleId;
 
     public PostmanService(WebClient.Builder webClientBuilder,
                           ObjectMapper objectMapper,
                           @Value("${POSTMAN_API_KEY:}") String postmanApiKey,
                           @Value("${POSTMAN_SOURCE_WORKSPACE_ID:}") String postmanSourceWorkspaceId,
-                          @Value("${POSTMAN_TARGET_WORKSPACE_ID:}") String postmanTargetWorkspaceId) {
+                          @Value("${POSTMAN_TARGET_WORKSPACE_ID:}") String postmanTargetWorkspaceId,
+                          @Value("${POSTMAN_WORKSPACE_NAME:Partner Workspace}") String postmanWorkspaceName,
+                          @Value("${POSTMAN_ADMIN_USER_IDS:}") String postmanAdminUserIds,
+                          @Value("${PARTNER_EMAILS:}") String partnerEmails,
+                          @Value("${PARTNER_ROLE_ID:7}") String partnerRoleId) {
         this.postmanApiKey = postmanApiKey != null ? postmanApiKey : "";
         this.postmanSourceWorkspaceId = postmanSourceWorkspaceId != null ? postmanSourceWorkspaceId : "";
         this.postmanTargetWorkspaceId = postmanTargetWorkspaceId != null ? postmanTargetWorkspaceId : "";
+        this.postmanWorkspaceName = postmanWorkspaceName != null ? postmanWorkspaceName : "Partner Workspace";
+        this.postmanAdminUserIds = postmanAdminUserIds != null ? postmanAdminUserIds : "";
+        this.partnerEmails = partnerEmails != null ? partnerEmails : "";
+        this.partnerRoleId = partnerRoleId != null && !partnerRoleId.isEmpty() ? partnerRoleId : "7";
         this.webClient = webClientBuilder
                 .baseUrl(POSTMAN_API_BASE)
                 .defaultHeader("Content-Type", "application/json")
@@ -308,6 +320,27 @@ public class PostmanService {
 
     public Mono<String> getSourceWorkspaceId() {
         return Mono.justOrEmpty(postmanSourceWorkspaceId);
+    }
+
+    public String getDefaultWorkspaceName() {
+        return postmanWorkspaceName != null && !postmanWorkspaceName.isEmpty()
+                ? postmanWorkspaceName : "Partner Workspace";
+    }
+
+    public List<String> getAdminUserIds() {
+        if (postmanAdminUserIds == null || postmanAdminUserIds.isBlank()) return List.of();
+        return Arrays.stream(postmanAdminUserIds.split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).toList();
+    }
+
+    public List<String> getPartnerEmails() {
+        if (partnerEmails == null || partnerEmails.isBlank()) return List.of();
+        return Arrays.stream(partnerEmails.split(","))
+                .map(String::trim).filter(s -> !s.isEmpty()).toList();
+    }
+
+    public String getPartnerRoleId() {
+        return partnerRoleId != null && !partnerRoleId.isEmpty() ? partnerRoleId : "7";
     }
 
     public Mono<CreateWorkspaceResult> createWorkspace(String name, String type, String description) {

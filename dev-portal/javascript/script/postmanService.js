@@ -7,6 +7,10 @@ import axios from "axios";
 const POSTMAN_API_KEY = process.env.POSTMAN_API_KEY;
 const POSTMAN_TARGET_WORKSPACE_ID = process.env.POSTMAN_TARGET_WORKSPACE_ID;
 const POSTMAN_SOURCE_WORKSPACE_ID = process.env.POSTMAN_SOURCE_WORKSPACE_ID;
+const POSTMAN_WORKSPACE_NAME = process.env.POSTMAN_WORKSPACE_NAME;
+const POSTMAN_ADMIN_USER_IDS = process.env.POSTMAN_ADMIN_USER_IDS;
+const PARTNER_EMAILS = process.env.PARTNER_EMAILS;
+const PARTNER_ROLE_ID = process.env.PARTNER_ROLE_ID;
 const POSTMAN_API_BASE = "https://api.getpostman.com";
 
 const COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url'];
@@ -87,6 +91,24 @@ const extractHostVariables = (collection) => {
 export const getTargetWorkspaceId = () => POSTMAN_TARGET_WORKSPACE_ID;
 
 export const getSourceWorkspaceId = () => POSTMAN_SOURCE_WORKSPACE_ID;
+
+export const getDefaultWorkspaceName = () => {
+  return POSTMAN_WORKSPACE_NAME || 'Partner Workspace';
+};
+
+export const getAdminUserIds = () => {
+  if (!POSTMAN_ADMIN_USER_IDS) return [];
+  return POSTMAN_ADMIN_USER_IDS.split(',').map(id => id.trim()).filter(Boolean);
+};
+
+export const getPartnerEmails = () => {
+  if (!PARTNER_EMAILS) return [];
+  return PARTNER_EMAILS.split(',').map(email => email.trim()).filter(Boolean);
+};
+
+export const getPartnerRoleId = () => {
+  return PARTNER_ROLE_ID || '7';
+};
 
 /**
  * Create a new Postman workspace.

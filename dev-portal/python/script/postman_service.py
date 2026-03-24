@@ -45,6 +45,24 @@ def _get_source_workspace_id() -> Optional[str]:
     return os.environ.get("POSTMAN_SOURCE_WORKSPACE_ID")
 
 
+def _get_workspace_name() -> str:
+    return os.environ.get("POSTMAN_WORKSPACE_NAME", "Partner Workspace")
+
+
+def _get_admin_user_ids() -> list[str]:
+    raw = os.environ.get("POSTMAN_ADMIN_USER_IDS", "")
+    return [uid.strip() for uid in raw.split(",") if uid.strip()] if raw else []
+
+
+def _get_partner_emails() -> list[str]:
+    raw = os.environ.get("PARTNER_EMAILS", "")
+    return [e.strip() for e in raw.split(",") if e.strip()] if raw else []
+
+
+def _get_partner_role_id() -> str:
+    return os.environ.get("PARTNER_ROLE_ID", "7")
+
+
 def _headers() -> dict[str, str]:
     return {
         "Content-Type": "application/json",
@@ -304,6 +322,26 @@ def get_target_workspace_id() -> Optional[str]:
 def get_source_workspace_id() -> Optional[str]:
     """Return source workspace ID from environment."""
     return _get_source_workspace_id()
+
+
+def get_default_workspace_name() -> str:
+    """Return workspace name from environment, defaulting to 'Partner Workspace'."""
+    return _get_workspace_name()
+
+
+def get_admin_user_ids() -> list[str]:
+    """Return admin user IDs from environment (comma-separated)."""
+    return _get_admin_user_ids()
+
+
+def get_partner_emails() -> list[str]:
+    """Return partner emails from environment (comma-separated)."""
+    return _get_partner_emails()
+
+
+def get_partner_role_id() -> str:
+    """Return partner role ID from environment, defaulting to '7'."""
+    return _get_partner_role_id()
 
 
 async def create_workspace(

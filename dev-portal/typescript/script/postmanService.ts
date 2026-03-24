@@ -332,6 +332,10 @@ export interface CollectionInfo {
 const POSTMAN_API_KEY: string | undefined = process.env.POSTMAN_API_KEY;
 const POSTMAN_TARGET_WORKSPACE_ID: string | undefined = process.env.POSTMAN_TARGET_WORKSPACE_ID;
 const POSTMAN_SOURCE_WORKSPACE_ID: string | undefined = process.env.POSTMAN_SOURCE_WORKSPACE_ID;
+const POSTMAN_WORKSPACE_NAME: string | undefined = process.env.POSTMAN_WORKSPACE_NAME;
+const POSTMAN_ADMIN_USER_IDS: string | undefined = process.env.POSTMAN_ADMIN_USER_IDS;
+const PARTNER_EMAILS: string | undefined = process.env.PARTNER_EMAILS;
+const PARTNER_ROLE_ID: string | undefined = process.env.PARTNER_ROLE_ID;
 const POSTMAN_API_BASE = "https://api.getpostman.com";
 
 const COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url'];
@@ -429,6 +433,24 @@ export const extractHostVariables = (collection: any): HostVariableInfo[] => {
 export const getTargetWorkspaceId = (): string | undefined => POSTMAN_TARGET_WORKSPACE_ID;
 
 export const getSourceWorkspaceId = (): string | undefined => POSTMAN_SOURCE_WORKSPACE_ID;
+
+export const getDefaultWorkspaceName = (): string => {
+  return POSTMAN_WORKSPACE_NAME || 'Partner Workspace';
+};
+
+export const getAdminUserIds = (): string[] => {
+  if (!POSTMAN_ADMIN_USER_IDS) return [];
+  return POSTMAN_ADMIN_USER_IDS.split(',').map(id => id.trim()).filter(Boolean);
+};
+
+export const getPartnerEmails = (): string[] => {
+  if (!PARTNER_EMAILS) return [];
+  return PARTNER_EMAILS.split(',').map(email => email.trim()).filter(Boolean);
+};
+
+export const getPartnerRoleId = (): string => {
+  return PARTNER_ROLE_ID || '7';
+};
 
 /**
  * Create a new Postman workspace.
