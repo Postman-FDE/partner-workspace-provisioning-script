@@ -9,7 +9,6 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -19,11 +18,9 @@ import java.util.function.Consumer;
 public class ResetService {
 
     private final PostmanClient client;
-    private final SpecService specService;
 
-    public ResetService(PostmanClient client, SpecService specService) {
+    public ResetService(PostmanClient client) {
         this.client = client;
-        this.specService = specService;
     }
 
     /**
