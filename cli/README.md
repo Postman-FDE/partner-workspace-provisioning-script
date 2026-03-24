@@ -26,7 +26,7 @@ Command-line tools for interactive Postman workspace provisioning and reset oper
 The CLI tools provide an interactive way to:
 
 - **Provision** new partner workspaces by copying collections, environments, mocks, and specs from a source workspace
-- **Map mock URLs** with path-aware variable naming and automatic collection variable updates
+- **Map mock URLs** with automatic mock environment creation and collection variable updates
 - **Reset** existing workspaces by deleting all or selected resources
 - **Manage** team members and partner invitations
 

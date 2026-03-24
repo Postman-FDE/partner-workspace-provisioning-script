@@ -10,7 +10,7 @@
  *   1. Copy collections from source to target workspace (+ extract host variables)
  *   2. Create mock servers for each copied collection
  *   3. Copy placeholder environments from source workspace
- *   4. Update Mock Env / Test Env with new mock URLs (with full URL paths appended)
+ *   4. Create fresh Mock Env with new mock URLs (bare mock server URLs)
  *   5. Update collection variables to reference mock env variable names
  *   6. Copy spec files from source to target workspace
  *   7. Add team members as workspace admins (optional)
@@ -51,8 +51,6 @@ const ADMIN_ROLE_ID = "3"; // Workspace Admin role
 // Partner workspace type
 const WORKSPACE_TYPE = "partner";
 
-// Environment names to update with mock URLs
-const MOCK_ENV_NAMES = ["Mock Env", "Mock Environment", "Test Env", "Test Environment"];
 
 /**
  * Parse comma-separated string into array of trimmed values
@@ -255,11 +253,20 @@ const extractUrlPath = (urlString) => {
   }
 };
 
+const COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url'];
+
 /**
  * Recursively traverse a collection's item tree and extract all unique
  * variable names used in request url.host fields (e.g. {{HostName}}).
- * Returns an array of { varName, originalUrl, path } objects, filtered
- * to only include variables whose values are actual URLs.
+ * Returns an array of { varName, originalUrl, path } objects.
+ *
+ * Two-tier detection:
+ *   1. Primary: variables found in request url.host whose values contain '://'
+ *   2. Fallback: if all detected variables are filtered out (values lack '://'),
+ *      keep them anyway (with empty path) so mock env vars still get created
+ *      and collection variables still get updated.
+ *   3. Last resort: if no variables found in request URLs at all, scan the
+ *      collection's variable array for common host variable names.
  */
 const extractHostVariables = (collection) => {
   const hostVarNames = new Set();
@@ -278,14 +285,25 @@ const extractHostVariables = (collection) => {
   traverse(collection.item || []);
 
   const collectionVars = collection.variable || [];
-  return Array.from(hostVarNames)
-    .map(varName => {
+
+  if (hostVarNames.size > 0) {
+    const allMapped = Array.from(hostVarNames).map(varName => {
       const varDef = collectionVars.find(v => v.key === varName);
       const originalUrl = varDef?.value || '';
-      const path = extractUrlPath(originalUrl);
-      return { varName, originalUrl, path };
-    })
-    .filter(hv => hv.originalUrl.includes('://'));
+      return { varName, originalUrl, path: extractUrlPath(originalUrl) };
+    });
+
+    const withProtocol = allMapped.filter(hv => hv.originalUrl.includes('://'));
+    if (withProtocol.length > 0) return withProtocol;
+
+    return allMapped.map(hv => ({ ...hv, path: '' }));
+  }
+
+  const fallbackVars = collectionVars
+    .filter(v => COMMON_HOST_VAR_NAMES.includes(v.key))
+    .map(v => ({ varName: v.key, originalUrl: v.value || '', path: '' }));
+
+  return fallbackVars;
 };
 
 // ============================================================================
@@ -709,42 +727,73 @@ const CollectionsHelper = {
   /**
    * Update all forked collections' variables to reference mock env variable names.
    * For each host variable found in a collection, replaces its value with {{mockEnvVarName}}.
+   * Includes a best-effort fallback for collections where no host variables were detected.
    */
   async updateAllVariables(mockEnvVarMap) {
-    const results = { success: [], failed: [] };
+    const results = { success: [], failed: [], warnings: [] };
 
     for (const [, collData] of Store.collections) {
-      if (!collData.hostVariables || collData.hostVariables.length === 0) continue;
       if (!collData.collectionDetails) continue;
 
       const existingVars = collData.collectionDetails.variable || [];
-      const updatedVars = existingVars.map(v => {
-        const hv = collData.hostVariables.find(h => h.varName === v.key);
-        if (hv) {
-          const mockEnvVarName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
-          if (mockEnvVarName) {
-            return { ...v, value: `{{${mockEnvVarName}}}` };
-          }
-        }
-        return v;
-      });
+      const hostVars = collData.hostVariables || [];
 
-      const patchResult = await CollectionsAPI.patchVariables(collData.targetUid, updatedVars);
-      if (patchResult.success) {
-        const updatedNames = collData.hostVariables
-          .map(hv => mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`))
-          .filter(Boolean);
-        results.success.push({ name: collData.name, variables: updatedNames });
-        log.success(`Updated variables for: ${collData.name}`);
-        for (const hv of collData.hostVariables) {
-          const envName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
-          if (envName) {
-            log.detail(`${hv.varName} -> {{${envName}}}`);
+      if (hostVars.length > 0) {
+        const updatedVars = existingVars.map(v => {
+          const hv = hostVars.find(h => h.varName === v.key);
+          if (hv) {
+            const mockEnvVarName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
+            if (mockEnvVarName) {
+              return { ...v, value: `{{${mockEnvVarName}}}` };
+            }
           }
+          return v;
+        });
+
+        const patchResult = await CollectionsAPI.patchVariables(collData.targetUid, updatedVars);
+        if (patchResult.success) {
+          const updatedNames = hostVars
+            .map(hv => mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`))
+            .filter(Boolean);
+          results.success.push({ name: collData.name, variables: updatedNames });
+          log.success(`Updated variables for: ${collData.name}`);
+          for (const hv of hostVars) {
+            const envName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
+            if (envName) {
+              log.detail(`${hv.varName} -> {{${envName}}}`);
+            }
+          }
+        } else {
+          results.failed.push({ name: collData.name, error: patchResult.error });
+          log.error(`Failed to update variables for "${collData.name}": ${patchResult.error}`);
         }
       } else {
-        results.failed.push({ name: collData.name, error: patchResult.error });
-        log.error(`Failed to update variables for "${collData.name}": ${patchResult.error}`);
+        const fallbackEnvVarName = mockEnvVarMap.get(`${collData.targetUid}:__fallback__`);
+        if (!fallbackEnvVarName) continue;
+
+        const matchedVar = existingVars.find(v =>
+          COMMON_HOST_VAR_NAMES.includes(v.key)
+        );
+
+        if (matchedVar) {
+          const updatedVars = existingVars.map(v =>
+            v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
+          );
+
+          const patchResult = await CollectionsAPI.patchVariables(collData.targetUid, updatedVars);
+          if (patchResult.success) {
+            results.success.push({ name: collData.name, variables: [fallbackEnvVarName] });
+            log.success(`Updated variables for: ${collData.name} (fallback)`);
+            log.detail(`${matchedVar.key} -> {{${fallbackEnvVarName}}}`);
+          } else {
+            results.failed.push({ name: collData.name, error: patchResult.error });
+            log.error(`Failed to update variables for "${collData.name}": ${patchResult.error}`);
+          }
+        } else {
+          results.warnings.push({ name: collData.name });
+          log.warn(`No host variable found in "${collData.name}" — mock env variable "${fallbackEnvVarName}" was created but collection variable was not updated`);
+          continue;
+        }
       }
 
       await delay(300);
@@ -885,7 +934,8 @@ const MocksHelper = {
    * Generate environment variables from mock URLs using host variable detection.
    * For each collection, for each host variable found in its requests, creates a
    * mock env variable named {camelCaseCollectionName}{PascalCaseVarName} with the
-   * mock server URL + the original URL's path appended.
+   * bare mock server URL (no path appended — mock servers route based on
+   * collection-relative paths, not the original API's base path).
    *
    * Also builds a mapping (mockEnvVarMap) used later to update collection variables.
    * The map key is "{targetCollectionUid}:{hostVarName}" -> mockEnvVarName.
@@ -914,7 +964,6 @@ const MocksHelper = {
 
       const hostVars = collData.hostVariables || [];
       if (hostVars.length === 0) {
-        // Fallback: no host variables detected, use collection-level naming
         const varName = toCamelCase(collData.name) + 'BaseUrl';
         variables.push({
           key: varName,
@@ -922,6 +971,7 @@ const MocksHelper = {
           enabled: true,
           type: 'default',
         });
+        mockEnvVarMap.set(`${collData.targetUid}:__fallback__`, varName);
         continue;
       }
 
@@ -932,7 +982,7 @@ const MocksHelper = {
 
         variables.push({
           key: envVarName,
-          value: mockData.mockUrl + hv.path,
+          value: mockData.mockUrl,
           enabled: true,
           type: 'default',
         });
@@ -1103,26 +1153,11 @@ const EnvironmentsHelper = {
   },
 
   /**
-   * Find Mock Env or Test Env in target workspace
-   * Returns the environment UID if found, null otherwise
-   */
-  findMockEnv() {
-    for (const [, envData] of Store.environments) {
-      const normalizedName = envData.name.toLowerCase();
-      for (const mockEnvName of MOCK_ENV_NAMES) {
-        if (normalizedName === mockEnvName.toLowerCase()) {
-          return envData;
-        }
-      }
-    }
-    return null;
-  },
-
-  /**
-   * Update Mock Env with new mock URLs, or create new Mock Env if not found.
+   * Create a fresh Mock Env with generated mock URL variables.
+   * Always creates a new environment (does not scan for or merge into existing).
    * Returns the mockEnvVarMap needed for the collection variable update step.
    */
-  async updateOrCreateMockEnv(targetWorkspaceId) {
+  async createMockEnv(targetWorkspaceId) {
     const { variables: mockUrlVariables, mockEnvVarMap } = MocksHelper.generateMockUrlVariables();
     
     if (mockUrlVariables.length === 0) {
@@ -1130,69 +1165,25 @@ const EnvironmentsHelper = {
       return { success: false, error: 'No mock URLs available', mockEnvVarMap };
     }
     
-    // Try to find existing Mock Env
-    const existingMockEnv = this.findMockEnv();
+    log.info('Creating new "Mock Env" environment');
     
-    if (existingMockEnv) {
-      // Update existing Mock Env
-      log.info(`Updating existing environment: ${existingMockEnv.name}`);
+    const createResult = await EnvironmentsAPI.create(
+      'Mock Env',
+      mockUrlVariables,
+      targetWorkspaceId
+    );
+    
+    if (createResult.success) {
+      Store.environments.set('mock-env-created', {
+        sourceUid: null,
+        targetUid: createResult.environment.uid,
+        name: 'Mock Env',
+      });
       
-      // Get current environment details
-      const envDetails = await EnvironmentsAPI.getDetails(existingMockEnv.targetUid);
-      
-      if (!envDetails) {
-        return { success: false, error: 'Could not get environment details', mockEnvVarMap };
-      }
-      
-      // Merge existing variables with new mock URL variables
-      const existingValues = envDetails.values || [];
-      
-      // Add new variables, update existing ones
-      const mergedValues = [...existingValues];
-      for (const newVar of mockUrlVariables) {
-        const existingIndex = mergedValues.findIndex(v => v.key === newVar.key);
-        if (existingIndex >= 0) {
-          mergedValues[existingIndex] = newVar;
-        } else {
-          mergedValues.push(newVar);
-        }
-      }
-      
-      const updateResult = await EnvironmentsAPI.update(
-        existingMockEnv.targetUid,
-        existingMockEnv.name,
-        mergedValues
-      );
-      
-      if (updateResult.success) {
-        log.success(`Updated "${existingMockEnv.name}" with ${mockUrlVariables.length} mock URL variable(s)`);
-        return { success: true, environment: updateResult.environment, action: 'updated', mockEnvVarMap };
-      } else {
-        return { success: false, error: updateResult.error, mockEnvVarMap };
-      }
+      log.success(`Created "Mock Env" with ${mockUrlVariables.length} mock URL variable(s)`);
+      return { success: true, environment: createResult.environment, action: 'created', mockEnvVarMap };
     } else {
-      // Create new Mock Env
-      log.info('Creating new "Mock Env" environment');
-      
-      const createResult = await EnvironmentsAPI.create(
-        'Mock Env',
-        mockUrlVariables,
-        targetWorkspaceId
-      );
-      
-      if (createResult.success) {
-        // Add to store
-        Store.environments.set('mock-env-created', {
-          sourceUid: null,
-          targetUid: createResult.environment.uid,
-          name: 'Mock Env',
-        });
-        
-        log.success(`Created "Mock Env" with ${mockUrlVariables.length} mock URL variable(s)`);
-        return { success: true, environment: createResult.environment, action: 'created', mockEnvVarMap };
-      } else {
-        return { success: false, error: createResult.error, mockEnvVarMap };
-      }
+      return { success: false, error: createResult.error, mockEnvVarMap };
     }
   },
 };
@@ -1776,9 +1767,9 @@ async function runProvisioningWorkflow() {
   // =========================================================================
   // STEP 4: UPDATE MOCK ENV WITH MOCK URLS
   // =========================================================================
-  log.step('Step 4: Updating Mock Env with mock URLs...');
+  log.step('Step 4: Creating Mock Env with mock URLs...');
   
-  const mockEnvResult = await EnvironmentsHelper.updateOrCreateMockEnv(targetWorkspaceId);
+  const mockEnvResult = await EnvironmentsHelper.createMockEnv(targetWorkspaceId);
   results.mockEnvUpdate = mockEnvResult;
 
   // =========================================================================
@@ -1876,7 +1867,7 @@ async function runProvisioningWorkflow() {
   console.log(`  Collections:      ${results.collections.success}/${results.collections.total} copied`);
   console.log(`  Mock Servers:     ${results.mocks.success}/${results.mocks.total} created`);
   console.log(`  Environments:     ${results.environments.success}/${results.environments.total} copied`);
-  console.log(`  Mock Env:         ${results.mockEnvUpdate.success ? results.mockEnvUpdate.action : 'failed'}`);
+  console.log(`  Mock Env:         ${results.mockEnvUpdate.success ? 'created' : 'failed'}`);
   console.log(`  Collection Vars:  ${results.collectionVarUpdate.success}/${results.collectionVarUpdate.total} updated`);
   console.log(`  Specs:            ${results.specs.success}/${results.specs.total} copied`);
   console.log(`  Admins:           ${results.admins.success}/${results.admins.total} added`);

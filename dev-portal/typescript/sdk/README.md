@@ -59,7 +59,7 @@ const workspace = await client.getWorkspace('workspace-id');
 - Full TypeScript type safety
 - All Postman API endpoints
 - High-level services for provisioning and reset workflows
-- Mock URL path resolution — extracts URL paths from collection host variables and appends them to mock server URLs
+- Mock environment creation — always creates a fresh "Mock Env" with bare mock server URLs and fallback host variable detection
 - Collection variable mapping — patches forked collections to reference mock environment variables
 - Automatic retry with exponential backoff
 - Progress callbacks for long-running operations
@@ -104,7 +104,7 @@ const workspace = await client.getWorkspace('workspace-id');
 
 ### `ProvisioningService.provision()` - Full Provisioning
 
-Copies all collections, creates mocks, copies environments, creates a mock environment with path-resolved mock URLs, patches collection variables to reference the mock environment, copies specs, adds admins, and invites partners.
+Copies all collections, creates mocks, copies environments, creates a fresh mock environment with mock server URLs, patches collection variables to reference the mock environment, copies specs, adds admins, and invites partners.
 
 ```typescript
 import { PostmanClient, ProvisioningService } from '@postman/workspace-sdk';
@@ -821,7 +821,7 @@ const client = new PostmanClient({
 | 3 | Collections | Fork collections (basis for mocks) |
 | 4 | Mock Servers | Create for each collection |
 | 5 | Environments | Copy with original variables |
-| 6 | Mock Environment | Create/update env with path-resolved mock URLs (e.g., `directDebitsApiBaseUrl`) |
+| 6 | Mock Environment | Create fresh env with mock server URLs (e.g., `directDebitsApiBaseUrl`) |
 | 7 | Update Collection Variables | Patch forked collections to reference mock env variables |
 | 8 | API Specs | Copy specification files |
 | 9 | Admins | Add team members as workspace admins |

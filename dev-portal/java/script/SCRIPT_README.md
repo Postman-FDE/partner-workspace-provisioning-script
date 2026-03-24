@@ -30,7 +30,7 @@ This service automates the process of creating and managing Postman partner work
 2. Copy Collections       -> Fork all collections from source workspace
 3. Create Mock Servers    -> Generate mock servers for each collection
 4. Copy Environments      -> Duplicate environment configurations
-5. Update Mock Env        -> Create "Mock Env" with path-aware mock URLs
+5. Create Mock Env        -> Create fresh "Mock Env" with mock server URLs
 6. Update Collection Vars -> Patch collection host variables to reference mock env
 7. Copy API Specs         -> Transfer all API specification files
 8. Add Team Admins        -> Add internal team members as workspace admins
@@ -52,8 +52,8 @@ Deletes workspace resources in reverse dependency order:
 - **Reactive / non-blocking** — all HTTP operations use Spring WebFlux `WebClient` with `Mono<T>` return types
 - **Spring Boot integration** — `@Service` annotation for autowiring, `@Value` for configuration
 - **Inner record types** — strongly typed options and result records
-- **Complete Workspace Provisioning** — collection forking, mock server creation, environment handling, mock URL path resolution, collection variable mapping, API spec copying, team member management, partner invitation with "Run in Postman" links
-- **Mock URL Path Resolution** — inspects each collection's request URLs to find host variables (e.g. `{{HostName}}`, `{{baseUrl}}`), extracts the URL path from each variable's value, and appends it to the mock server URL
+- **Complete Workspace Provisioning** — collection forking, mock server creation, environment handling, mock environment creation, collection variable mapping, API spec copying, team member management, partner invitation with "Run in Postman" links
+- **Mock Environment Creation** — always creates a fresh "Mock Env" with bare mock server URLs; detects host variables via request URL inspection with fallback to common variable names
 - **Collection Variable Mapping** — after creating mock env variables, each forked collection is PATCHed to update its host variables to reference the corresponding mock env variable
 - **Custom Selection Provisioning** — choose specific asset types and individual items
 - **Safe Reset Functionality** — dependency-aware deletion order, selective deletion

@@ -23,6 +23,8 @@ import {
   HostVariableInfo,
 } from '../types';
 
+const COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url'];
+
 export interface ProvisioningConfig {
   client: PostmanClient;
   sourceWorkspaceId: string;
@@ -293,19 +295,7 @@ export class ProvisioningService {
     const { variables: mockUrlVariables, mockEnvVarMap } = this.generateMockUrlVariables();
     if (mockUrlVariables.length === 0) return mockEnvVarMap;
 
-    const mockEnvMapping = Array.from(this.environmentMappings.values()).find((m) =>
-      this.config.mockEnvNames?.some((name) => m.name.toLowerCase() === name.toLowerCase())
-    );
-
-    if (mockEnvMapping) {
-      const details = await this.client.getEnvironmentDetails(mockEnvMapping.targetUid);
-      if (details) {
-        const mergedValues = this.mergeVariables(details.values || [], mockUrlVariables);
-        await this.client.updateEnvironment(mockEnvMapping.targetUid, mockEnvMapping.name, mergedValues);
-      }
-    } else {
-      await this.client.createEnvironment('Mock Env', mockUrlVariables, targetWorkspaceId);
-    }
+    await this.client.createEnvironment('Mock Env', mockUrlVariables, targetWorkspaceId);
 
     return mockEnvVarMap;
   }
@@ -321,13 +311,14 @@ export class ProvisioningService {
       const hostVars = collMapping.hostVariables || [];
       if (hostVars.length === 0) {
         const varName = this.toVariableName(collMapping.name) + 'BaseUrl';
+        mockEnvVarMap.set(`${collMapping.targetUid}:__fallback__`, varName);
         variables.push({ key: varName, value: mockMapping.mockUrl, enabled: true, type: 'default' });
         continue;
       }
 
       for (const hv of hostVars) {
         const envVarName = this.toVariableName(collMapping.name) + this.toPascalCase(hv.varName);
-        variables.push({ key: envVarName, value: mockMapping.mockUrl + hv.path, enabled: true, type: 'default' });
+        variables.push({ key: envVarName, value: mockMapping.mockUrl, enabled: true, type: 'default' });
         mockEnvVarMap.set(`${collMapping.targetUid}:${hv.varName}`, envVarName);
       }
     }
@@ -379,44 +370,70 @@ export class ProvisioningService {
     }
     traverse(collection.item || []);
     const collectionVars: any[] = collection.variable || [];
-    return Array.from(hostVarNames)
-      .map(varName => {
+
+    if (hostVarNames.size > 0) {
+      const mapped = Array.from(hostVarNames).map((varName) => {
         const varDef = collectionVars.find((v: any) => v.key === varName);
         const originalUrl = varDef?.value || '';
         const path = this.extractUrlPath(originalUrl);
         return { varName, originalUrl, path };
-      })
-      .filter(hv => hv.originalUrl.includes('://'));
-  }
+      });
+      const withScheme = mapped.filter((hv) => hv.originalUrl.includes('://'));
+      if (withScheme.length > 0) return withScheme;
+      return mapped.map((hv) => ({ ...hv, path: '' }));
+    }
 
-  private mergeVariables(existing: EnvironmentVariable[], newVars: EnvironmentVariable[]): EnvironmentVariable[] {
-    const merged = [...existing];
-    for (const newVar of newVars) {
-      const existingIndex = merged.findIndex((v) => v.key === newVar.key);
-      if (existingIndex >= 0) {
-        merged[existingIndex] = newVar;
-      } else {
-        merged.push(newVar);
+    const lowerCommon = new Set(COMMON_HOST_VAR_NAMES.map((n) => n.toLowerCase()));
+    const found: HostVariableInfo[] = [];
+    for (const v of collectionVars) {
+      if (v?.key && lowerCommon.has(String(v.key).toLowerCase())) {
+        const originalUrl = v.value || '';
+        const path = this.extractUrlPath(originalUrl);
+        found.push({ varName: v.key, originalUrl, path });
       }
     }
-    return merged;
+    return found;
   }
 
   private async updateCollectionVariables(mockEnvVarMap: Map<string, string>): Promise<void> {
     if (mockEnvVarMap.size === 0) return;
 
-    for (const [, collMapping] of this.collectionMappings) {
-      if (!collMapping.hostVariables?.length || !collMapping.collectionDetails) continue;
+    const lowerCommon = new Set(COMMON_HOST_VAR_NAMES.map((n) => n.toLowerCase()));
 
+    for (const [, collMapping] of this.collectionMappings) {
+      if (!collMapping.collectionDetails) continue;
+
+      const hostVars = collMapping.hostVariables || [];
       const existingVars: any[] = collMapping.collectionDetails.variable || [];
-      const updatedVars = existingVars.map((v: any) => {
-        const hv = collMapping.hostVariables!.find(h => h.varName === v.key);
-        if (hv) {
-          const envName = mockEnvVarMap.get(`${collMapping.targetUid}:${hv.varName}`);
-          if (envName) return { ...v, value: `{{${envName}}}` };
+
+      let updatedVars: any[];
+
+      if (hostVars.length > 0) {
+        updatedVars = existingVars.map((v: any) => {
+          const hv = hostVars.find((h) => h.varName === v.key);
+          if (hv) {
+            const envName = mockEnvVarMap.get(`${collMapping.targetUid}:${hv.varName}`);
+            if (envName) return { ...v, value: `{{${envName}}}` };
+          }
+          return v;
+        });
+      } else {
+        const envName = mockEnvVarMap.get(`${collMapping.targetUid}:__fallback__`);
+        if (!envName) continue;
+
+        let commonKey: string | undefined;
+        for (const v of existingVars) {
+          if (v?.key && lowerCommon.has(String(v.key).toLowerCase())) {
+            commonKey = v.key;
+            break;
+          }
         }
-        return v;
-      });
+        if (!commonKey) continue;
+
+        updatedVars = existingVars.map((v: any) =>
+          v.key === commonKey ? { ...v, value: `{{${envName}}}` } : v
+        );
+      }
 
       await this.client.patchCollectionVariables(collMapping.targetUid, updatedVars);
       await this.delay(300);

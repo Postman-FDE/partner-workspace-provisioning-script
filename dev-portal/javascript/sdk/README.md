@@ -134,7 +134,7 @@ const resetResult = await resetter.reset('workspace-id');
 
 ### `provisionWorkspace()` - Full Provisioning
 
-Copies all collections, creates mocks, copies environments, creates a mock environment with path-resolved mock URLs, patches collection variables to reference the mock environment, copies specs, adds admins, and invites partners.
+Copies all collections, creates mocks, copies environments, creates a fresh mock environment with mock server URLs, patches collection variables to reference the mock environment, copies specs, adds admins, and invites partners.
 
 ```javascript
 import { provisionWorkspace } from '@postman/workspace-sdk';
@@ -1045,7 +1045,7 @@ The provisioning follows a specific order to ensure dependencies are met:
 | 3 | Collections | Fork collections (basis for mocks) |
 | 4 | Mock Servers | Create for each collection |
 | 5 | Environments | Copy with original variables |
-| 6 | Mock Environment | Create/update env with path-resolved mock URLs (e.g., `directDebitsApiBaseUrl`) |
+| 6 | Mock Environment | Create fresh env with mock server URLs (e.g., `directDebitsApiBaseUrl`) |
 | 7 | Update Collection Variables | Patch forked collections to reference mock env variables |
 | 8 | API Specs | Copy specification files |
 | 9 | Admins | Add team members as workspace admins |

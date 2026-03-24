@@ -30,7 +30,7 @@ import httpx
 # ============================================================================
 
 POSTMAN_API_BASE = "https://api.getpostman.com"
-MOCK_ENV_NAMES = ["Mock Env", "Mock Environment", "Test Env", "Test Environment"]
+COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url']
 
 
 def _get_api_key() -> str:
@@ -1617,9 +1617,9 @@ async def provision_workspace(
                 results["errors"].append(f"Failed to copy {env_details['name']}: {create_result.error}")
             await asyncio.sleep(0.3)
 
-        # Step 5: Update/Create Mock Env
+        # Step 5: Create fresh Mock Env
         if on_progress:
-            on_progress({"phase": "mockEnv", "message": "Updating Mock Environment...", "progress": 75})
+            on_progress({"phase": "mockEnv", "message": "Creating Mock Environment...", "progress": 75})
         mock_env_var_map: dict[str, str] = {}
         if results["mocks"]["urls"]:
             mock_variables: list[dict[str, Any]] = []
@@ -1636,10 +1636,9 @@ async def provision_workspace(
                     for hv in host_vars:
                         pascal_var = to_pascal_case(hv["var_name"])
                         env_var_name = f"{camel_name}{pascal_var}"
-                        value_with_path = f"{mock_url}{hv['path']}" if hv.get("path") else mock_url
                         mock_variables.append({
                             "key": env_var_name,
-                            "value": value_with_path,
+                            "value": mock_url,
                             "type": "default",
                             "enabled": True,
                             "description": f"Mock server URL for {coll_name} (variable: {hv['var_name']})",
@@ -1648,7 +1647,7 @@ async def provision_workspace(
                             mock_env_var_map[f"{coll_data['uid']}:{hv['var_name']}"] = env_var_name
                 else:
                     camel_name = to_camel_case(coll_name)
-                    env_var_name = f"{camel_name}MockUrl"
+                    env_var_name = f"{camel_name}BaseUrl"
                     mock_variables.append({
                         "key": env_var_name,
                         "value": mock_url,
@@ -1656,48 +1655,48 @@ async def provision_workspace(
                         "enabled": True,
                         "description": f"Mock server URL for {coll_name}",
                     })
+                    if coll_data:
+                        mock_env_var_map[f"{coll_data['uid']}:__fallback__"] = env_var_name
 
-            mock_env = None
-            for env_data in env_map.values():
-                if env_data["name"].lower() in [n.lower() for n in MOCK_ENV_NAMES]:
-                    mock_env = env_data
-                    break
-            if mock_env:
-                env_details = await get_environment_details(mock_env["target_uid"])
-                merged = list(env_details.get("values", [])) + mock_variables
-                update_result = await update_environment(
-                    mock_env["target_uid"], mock_env["name"], merged
-                )
-                if update_result.success:
-                    results["mock_env"] = {"success": True, "action": "updated"}
-                else:
-                    results["errors"].append(f"Failed to update Mock Env: {update_result.error}")
+            create_result = await create_environment_in_postman(
+                "Mock Env", mock_variables, workspace_id
+            )
+            if create_result.success:
+                results["mock_env"] = {"success": True, "action": "created"}
             else:
-                create_result = await create_environment_in_postman(
-                    "Mock Env", mock_variables, workspace_id
-                )
-                if create_result.success:
-                    results["mock_env"] = {"success": True, "action": "created"}
-                else:
-                    results["errors"].append(f"Failed to create Mock Env: {create_result.error}")
+                results["errors"].append(f"Failed to create Mock Env: {create_result.error}")
 
         # Step 5b: Update collection variables to reference mock env var names
         if mock_env_var_map:
             for coll in results["collections"]["success_data"]:
-                host_vars = coll.get("host_variables", [])
-                if not host_vars or not coll.get("collection_details"):
+                if not coll.get("collection_details"):
                     continue
+                host_vars = coll.get("host_variables", [])
                 existing_vars = coll["collection_details"].get("variable", [])
-                updated_vars = []
-                for v in existing_vars:
-                    hv = next((h for h in host_vars if h["var_name"] == v.get("key")), None)
-                    if hv:
-                        env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
-                        if env_name:
+                updated_vars: list[dict[str, Any]] = []
+                if host_vars:
+                    for v in existing_vars:
+                        hv = next((h for h in host_vars if h["var_name"] == v.get("key")), None)
+                        if hv:
+                            env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
+                            if env_name:
+                                updated_vars.append({**v, "value": f"{{{{{env_name}}}}}"})
+                                continue
+                        updated_vars.append(v)
+                    await patch_collection_variables(coll["uid"], updated_vars)
+                else:
+                    env_name = mock_env_var_map.get(f"{coll['uid']}:__fallback__")
+                    if not env_name:
+                        continue
+                    fallback_done = False
+                    for v in existing_vars:
+                        if not fallback_done and v.get("key") in COMMON_HOST_VAR_NAMES:
                             updated_vars.append({**v, "value": f"{{{{{env_name}}}}}"})
-                            continue
-                    updated_vars.append(v)
-                await patch_collection_variables(coll["uid"], updated_vars)
+                            fallback_done = True
+                        else:
+                            updated_vars.append(v)
+                    if fallback_done:
+                        await patch_collection_variables(coll["uid"], updated_vars)
 
         # Step 6: Copy Specs
         if on_progress:
@@ -2145,7 +2144,7 @@ async def provision_custom_workspace(
             mock_env_var_map: dict[str, str] = {}
             if create_mock_env and results["mocks"]["urls"]:
                 if on_progress:
-                    on_progress({"phase": "mockEnv", "message": "Updating Mock Environment...", "progress": 75})
+                    on_progress({"phase": "mockEnv", "message": "Creating Mock Environment...", "progress": 75})
                 mock_variables: list[dict[str, Any]] = []
                 for mock_entry in results["mocks"]["urls"]:
                     coll_name = mock_entry["collection_name"]
@@ -2160,10 +2159,9 @@ async def provision_custom_workspace(
                         for hv in host_vars:
                             pascal_var = to_pascal_case(hv["var_name"])
                             env_var_name = f"{camel_name}{pascal_var}"
-                            value_with_path = f"{mock_url}{hv['path']}" if hv.get("path") else mock_url
                             mock_variables.append({
                                 "key": env_var_name,
-                                "value": value_with_path,
+                                "value": mock_url,
                                 "type": "default",
                                 "enabled": True,
                                 "description": f"Mock server URL for {coll_name} (variable: {hv['var_name']})",
@@ -2172,7 +2170,7 @@ async def provision_custom_workspace(
                                 mock_env_var_map[f"{coll_data['uid']}:{hv['var_name']}"] = env_var_name
                     else:
                         camel_name = to_camel_case(coll_name)
-                        env_var_name = f"{camel_name}MockUrl"
+                        env_var_name = f"{camel_name}BaseUrl"
                         mock_variables.append({
                             "key": env_var_name,
                             "value": mock_url,
@@ -2180,45 +2178,45 @@ async def provision_custom_workspace(
                             "enabled": True,
                             "description": f"Mock server URL for {coll_name}",
                         })
+                        if coll_data:
+                            mock_env_var_map[f"{coll_data['uid']}:__fallback__"] = env_var_name
 
-                mock_env = None
-                for env_data in env_map.values():
-                    if env_data["name"].lower() in [n.lower() for n in MOCK_ENV_NAMES]:
-                        mock_env = env_data
-                        break
-                if mock_env:
-                    ed = await get_environment_details(mock_env["target_uid"])
-                    merged = list(ed.get("values", [])) + mock_variables
-                    ur = await update_environment(
-                        mock_env["target_uid"], mock_env["name"], merged
-                    )
-                    if ur.success:
-                        results["mock_env"] = {"success": True, "action": "updated"}
-                    else:
-                        results["errors"].append(f"Failed to update Mock Env: {ur.error}")
+                cr = await create_environment_in_postman("Mock Env", mock_variables, workspace_id)
+                if cr.success:
+                    results["mock_env"] = {"success": True, "action": "created"}
                 else:
-                    cr = await create_environment_in_postman("Mock Env", mock_variables, workspace_id)
-                    if cr.success:
-                        results["mock_env"] = {"success": True, "action": "created"}
-                    else:
-                        results["errors"].append(f"Failed to create Mock Env: {cr.error}")
+                    results["errors"].append(f"Failed to create Mock Env: {cr.error}")
 
             if mock_env_var_map:
                 for coll in results["collections"]["success_data"]:
-                    host_vars = coll.get("host_variables", [])
-                    if not host_vars or not coll.get("collection_details"):
+                    if not coll.get("collection_details"):
                         continue
+                    host_vars = coll.get("host_variables", [])
                     existing_vars = coll["collection_details"].get("variable", [])
-                    updated_vars = []
-                    for v in existing_vars:
-                        hv = next((h for h in host_vars if h["var_name"] == v.get("key")), None)
-                        if hv:
-                            env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
-                            if env_name:
+                    updated_vars: list[dict[str, Any]] = []
+                    if host_vars:
+                        for v in existing_vars:
+                            hv = next((h for h in host_vars if h["var_name"] == v.get("key")), None)
+                            if hv:
+                                env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
+                                if env_name:
+                                    updated_vars.append({**v, "value": f"{{{{{env_name}}}}}"})
+                                    continue
+                            updated_vars.append(v)
+                        await patch_collection_variables(coll["uid"], updated_vars)
+                    else:
+                        env_name = mock_env_var_map.get(f"{coll['uid']}:__fallback__")
+                        if not env_name:
+                            continue
+                        fallback_done = False
+                        for v in existing_vars:
+                            if not fallback_done and v.get("key") in COMMON_HOST_VAR_NAMES:
                                 updated_vars.append({**v, "value": f"{{{{{env_name}}}}}"})
-                                continue
-                        updated_vars.append(v)
-                    await patch_collection_variables(coll["uid"], updated_vars)
+                                fallback_done = True
+                            else:
+                                updated_vars.append(v)
+                        if fallback_done:
+                            await patch_collection_variables(coll["uid"], updated_vars)
 
         if copy_specs:
             if on_progress:
@@ -2487,7 +2485,7 @@ def extract_url_path(url_string: str) -> str:
 
 
 def extract_host_variables(collection: dict) -> list[dict]:
-    """Extract host variable names from collection request URLs and map to their values/paths."""
+    """Extract host variable names from collection request URLs with fallback detection."""
     host_var_names: set[str] = set()
 
     def traverse(items: list):
@@ -2506,14 +2504,23 @@ def extract_host_variables(collection: dict) -> list[dict]:
     traverse(collection.get('item', []))
 
     collection_vars = collection.get('variable', [])
-    result = []
-    for var_name in host_var_names:
-        var_def = next((v for v in collection_vars if v.get('key') == var_name), None)
-        original_url = var_def.get('value', '') if var_def else ''
-        path = extract_url_path(original_url)
-        if '://' in original_url:
-            result.append({'var_name': var_name, 'original_url': original_url, 'path': path})
-    return result
+
+    if host_var_names:
+        all_mapped = []
+        for var_name in host_var_names:
+            var_def = next((v for v in collection_vars if v.get('key') == var_name), None)
+            original_url = var_def.get('value', '') if var_def else ''
+            all_mapped.append({'var_name': var_name, 'original_url': original_url, 'path': extract_url_path(original_url)})
+        with_protocol = [hv for hv in all_mapped if '://' in hv['original_url']]
+        if with_protocol:
+            return with_protocol
+        return [{'var_name': hv['var_name'], 'original_url': hv['original_url'], 'path': ''} for hv in all_mapped]
+
+    return [
+        {'var_name': v.get('key', ''), 'original_url': v.get('value', ''), 'path': ''}
+        for v in collection_vars
+        if v.get('key') in COMMON_HOST_VAR_NAMES
+    ]
 
 
 def get_api_key() -> Optional[str]:

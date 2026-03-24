@@ -19,7 +19,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -32,8 +31,9 @@ import java.util.stream.Collectors;
 public class PostmanService {
 
     private static final String POSTMAN_API_BASE = "https://api.getpostman.com";
-    private static final List<String> MOCK_ENV_NAMES = List.of(
-            "Mock Env", "Mock Environment", "Test Env", "Test Environment"
+    private static final List<String> COMMON_HOST_VAR_NAMES = List.of(
+            "baseUrl", "baseurl", "base_url", "HostName", "hostname", "host",
+            "apiUrl", "apiurl", "api_url", "serverUrl", "serverurl", "server_url"
     );
 
     private final WebClient webClient;
@@ -250,19 +250,30 @@ public class PostmanService {
         traverseItems(items, hostVarNames);
 
         List<Map<String, Object>> collectionVars = (List<Map<String, Object>>) collection.getOrDefault("variable", List.of());
-        List<Map<String, Object>> result = new ArrayList<>();
 
-        for (String varName : hostVarNames) {
-            Map<String, Object> varDef = collectionVars.stream()
-                .filter(v -> varName.equals(v.get("key")))
-                .findFirst().orElse(null);
-            String originalUrl = varDef != null ? String.valueOf(varDef.getOrDefault("value", "")) : "";
-            if (originalUrl.contains("://")) {
+        if (!hostVarNames.isEmpty()) {
+            List<Map<String, Object>> allMapped = new ArrayList<>();
+            for (String varName : hostVarNames) {
+                Map<String, Object> varDef = collectionVars.stream()
+                    .filter(v -> varName.equals(v.get("key")))
+                    .findFirst().orElse(null);
+                String originalUrl = varDef != null ? String.valueOf(varDef.getOrDefault("value", "")) : "";
                 String path = extractUrlPath(originalUrl);
-                result.add(Map.of("varName", varName, "originalUrl", originalUrl, "path", path));
+                allMapped.add(Map.of("varName", varName, "originalUrl", originalUrl, "path", path));
             }
+            List<Map<String, Object>> withProtocol = allMapped.stream()
+                .filter(hv -> ((String) hv.get("originalUrl")).contains("://"))
+                .collect(Collectors.toList());
+            if (!withProtocol.isEmpty()) return withProtocol;
+            return allMapped.stream()
+                .map(hv -> Map.<String, Object>of("varName", hv.get("varName"), "originalUrl", hv.get("originalUrl"), "path", ""))
+                .collect(Collectors.toList());
         }
-        return result;
+
+        return collectionVars.stream()
+            .filter(v -> COMMON_HOST_VAR_NAMES.contains(String.valueOf(v.get("key"))))
+            .map(v -> Map.<String, Object>of("varName", v.get("key"), "originalUrl", String.valueOf(v.getOrDefault("value", "")), "path", ""))
+            .collect(Collectors.toList());
     }
 
     @SuppressWarnings("unchecked")
@@ -1402,40 +1413,20 @@ public class PostmanService {
                                                         String varName = toCamelCase((String) mock.get("collectionName")) + "BaseUrl";
                                                         mockVars.add(Map.of("key", varName, "value", mock.get("mockUrl"),
                                                                 "type", "default", "enabled", true));
+                                                        mockEnvVarMap.put(mock.get("targetUid") + ":__fallback__", varName);
                                                     } else {
                                                         for (Map<String, Object> hv : hostVars) {
                                                             String envVarName = toCamelCase((String) mock.get("collectionName"))
                                                                     + toPascalCase((String) hv.get("varName"));
-                                                            String mockUrlWithPath = mock.get("mockUrl")
-                                                                    + String.valueOf(hv.getOrDefault("path", ""));
-                                                            mockVars.add(Map.of("key", envVarName, "value", mockUrlWithPath,
+                                                            mockVars.add(Map.of("key", envVarName, "value", mock.get("mockUrl"),
                                                                     "type", "default", "enabled", true));
                                                             mockEnvVarMap.put(mock.get("targetUid") + ":" + hv.get("varName"), envVarName);
                                                         }
                                                     }
                                                 }
-                                                Optional<Map<String, Object>> mockEnvOpt = envMap.values().stream()
-                                                        .filter(ed -> MOCK_ENV_NAMES.stream().anyMatch(n -> n.equalsIgnoreCase((String) ed.get("name"))))
-                                                        .findFirst();
-                                                if (mockEnvOpt.isPresent()) {
-                                                    Map<String, Object> me = mockEnvOpt.get();
-                                                    return getEnvironmentDetails((String) me.get("targetUid"))
-                                                            .flatMap(ed -> {
-                                                                @SuppressWarnings("unchecked")
-                                                                List<Map<String, Object>> existing = ed != null && ed.get("values") != null ? (List<Map<String, Object>>) ed.get("values") : List.of();
-                                                                List<Map<String, Object>> merged = new ArrayList<>(existing);
-                                                                merged.addAll(mockVars);
-                                                                return updateEnvironment((String) me.get("targetUid"), (String) me.get("name"), merged)
-                                                                        .doOnNext(ur -> mockEnv.put("success", ur.success()))
-                                                                        .doOnNext(ur -> mockEnv.put("action", "updated"))
-                                                                        .then();
-                                                            })
-                                                            .switchIfEmpty(Mono.fromRunnable(() -> {}));
-                                                } else {
-                                                    return createEnvironmentInPostman("Mock Env", mockVars, workspaceId)
-                                                            .doOnNext(cr -> { mockEnv.put("success", cr.success()); mockEnv.put("action", "created"); })
-                                                            .then();
-                                                }
+                                                return createEnvironmentInPostman("Mock Env", mockVars, workspaceId)
+                                                        .doOnNext(cr -> { mockEnv.put("success", cr.success()); mockEnv.put("action", "created"); })
+                                                        .then();
                                             }
                                             return Mono.empty();
                                         }));
@@ -1450,26 +1441,43 @@ public class PostmanService {
                             .concatMap(coll -> {
                                 @SuppressWarnings("unchecked")
                                 List<Map<String, Object>> hvList = (List<Map<String, Object>>) coll.getOrDefault("hostVariables", List.of());
-                                if (hvList.isEmpty()) return Mono.empty();
                                 @SuppressWarnings("unchecked")
                                 Map<String, Object> collDetails = (Map<String, Object>) coll.get("collectionDetails");
                                 if (collDetails == null || collDetails.isEmpty()) return Mono.empty();
                                 @SuppressWarnings("unchecked")
                                 List<Map<String, Object>> existingVars = (List<Map<String, Object>>) collDetails.getOrDefault("variable", List.of());
-                                List<Map<String, Object>> updatedVars = existingVars.stream().map(v -> {
-                                    String key = (String) v.get("key");
-                                    for (Map<String, Object> hv : hvList) {
-                                        if (hv.get("varName").equals(key)) {
-                                            String envName = mockEnvVarMap.get(coll.get("uid") + ":" + hv.get("varName"));
-                                            if (envName != null) {
-                                                Map<String, Object> updated = new HashMap<>(v);
-                                                updated.put("value", "{{" + envName + "}}");
-                                                return updated;
+                                if (!hvList.isEmpty()) {
+                                    List<Map<String, Object>> updatedVars = existingVars.stream().map(v -> {
+                                        String key = (String) v.get("key");
+                                        for (Map<String, Object> hv : hvList) {
+                                            if (hv.get("varName").equals(key)) {
+                                                String envName = mockEnvVarMap.get(coll.get("uid") + ":" + hv.get("varName"));
+                                                if (envName != null) {
+                                                    Map<String, Object> updated = new HashMap<>(v);
+                                                    updated.put("value", "{{" + envName + "}}");
+                                                    return updated;
+                                                }
                                             }
                                         }
+                                        return v;
+                                    }).collect(Collectors.toList());
+                                    return patchCollectionVariables((String) coll.get("uid"), updatedVars)
+                                            .then(delay(300));
+                                }
+                                String fallbackEnv = mockEnvVarMap.get(coll.get("uid") + ":__fallback__");
+                                if (fallbackEnv == null) return Mono.empty();
+                                boolean[] matched = { false };
+                                List<Map<String, Object>> updatedVars = existingVars.stream().map(v -> {
+                                    String key = String.valueOf(v.get("key"));
+                                    if (!matched[0] && COMMON_HOST_VAR_NAMES.contains(key)) {
+                                        matched[0] = true;
+                                        Map<String, Object> updated = new HashMap<>(v);
+                                        updated.put("value", "{{" + fallbackEnv + "}}");
+                                        return updated;
                                     }
                                     return v;
                                 }).collect(Collectors.toList());
+                                if (!matched[0]) return Mono.empty();
                                 return patchCollectionVariables((String) coll.get("uid"), updatedVars)
                                         .then(delay(300));
                             })

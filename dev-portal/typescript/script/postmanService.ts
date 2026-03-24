@@ -334,7 +334,7 @@ const POSTMAN_TARGET_WORKSPACE_ID: string | undefined = process.env.POSTMAN_TARG
 const POSTMAN_SOURCE_WORKSPACE_ID: string | undefined = process.env.POSTMAN_SOURCE_WORKSPACE_ID;
 const POSTMAN_API_BASE = "https://api.getpostman.com";
 
-const MOCK_ENV_NAMES = ["Mock Env", "Mock Environment", "Test Env", "Test Environment"];
+const COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url'];
 
 const headers = (): Record<string, string> => ({
   "Content-Type": "application/json",
@@ -405,14 +405,21 @@ export const extractHostVariables = (collection: any): HostVariableInfo[] => {
   }
   traverse(collection.item || []);
   const collectionVars: any[] = collection.variable || [];
-  return Array.from(hostVarNames)
-    .map(varName => {
+
+  if (hostVarNames.size > 0) {
+    const allMapped = Array.from(hostVarNames).map(varName => {
       const varDef = collectionVars.find((v: any) => v.key === varName);
       const originalUrl = varDef?.value || '';
-      const path = extractUrlPath(originalUrl);
-      return { varName, originalUrl, path };
-    })
-    .filter(hv => hv.originalUrl.includes('://'));
+      return { varName, originalUrl, path: extractUrlPath(originalUrl) };
+    });
+    const withProtocol = allMapped.filter(hv => hv.originalUrl.includes('://'));
+    if (withProtocol.length > 0) return withProtocol;
+    return allMapped.map(hv => ({ ...hv, path: '' }));
+  }
+
+  return collectionVars
+    .filter((v: any) => COMMON_HOST_VAR_NAMES.includes(v.key))
+    .map((v: any) => ({ varName: v.key, originalUrl: v.value || '', path: '' }));
 };
 
 // ============================================================================
@@ -1822,8 +1829,8 @@ export const provisionWorkspace = async (
       await delay(300);
     }
 
-    // Step 5: Update/Create Mock Env (per-host-variable naming with paths)
-    onProgress?.({ phase: "mockEnv", message: "Updating Mock Environment...", progress: 75 });
+    // Step 5: Create fresh Mock Env (per-host-variable naming)
+    onProgress?.({ phase: "mockEnv", message: "Creating Mock Environment...", progress: 75 });
     const mockEnvVarMap = new Map<string, string>();
     if (results.mocks.urls.length > 0) {
       const mockVariables: EnvironmentVariable[] = [];
@@ -1837,6 +1844,10 @@ export const provisionWorkspace = async (
             type: "default",
             enabled: true,
           });
+          const collUid = results.collections.successData.find(
+            (c) => c.name === mockEntry.collectionName
+          )?.uid;
+          if (collUid) mockEnvVarMap.set(`${collUid}:__fallback__`, varName);
         } else {
           for (const hv of hostVars) {
             const collectionPart = toCamelCase(mockEntry.collectionName);
@@ -1844,7 +1855,7 @@ export const provisionWorkspace = async (
             const envVarName = collectionPart + varPart;
             mockVariables.push({
               key: envVarName,
-              value: (mockEntry.mockUrl ?? "") + hv.path,
+              value: mockEntry.mockUrl ?? "",
               type: "default",
               enabled: true,
             });
@@ -1856,41 +1867,11 @@ export const provisionWorkspace = async (
         }
       }
 
-      let mockEnv: { targetUid: string; name: string } | null = null;
-      for (const envData of Array.from(envMap.values())) {
-        if (
-          MOCK_ENV_NAMES.some(
-            (name) => envData.name.toLowerCase() === name.toLowerCase()
-          )
-        ) {
-          mockEnv = envData;
-          break;
-        }
-      }
-      if (mockEnv) {
-        const envDetails = await getEnvironmentDetails(mockEnv.targetUid);
-        const mergedValues = [...(envDetails?.values ?? []), ...mockVariables];
-        const updateResult = await updateEnvironment(
-          mockEnv.targetUid,
-          mockEnv.name,
-          mergedValues
-        );
-        if (updateResult.success) {
-          results.mockEnv = { success: true, action: "updated" };
-        } else {
-          results.errors.push(`Failed to update Mock Env: ${updateResult.error}`);
-        }
+      const createResult = await createEnvironmentInPostman("Mock Env", mockVariables, workspaceId!);
+      if (createResult.success) {
+        results.mockEnv = { success: true, action: "created" };
       } else {
-        const createResult = await createEnvironmentInPostman(
-          "Mock Env",
-          mockVariables,
-          workspaceId!
-        );
-        if (createResult.success) {
-          results.mockEnv = { success: true, action: "created" };
-        } else {
-          results.errors.push(`Failed to create Mock Env: ${createResult.error}`);
-        }
+        results.errors.push(`Failed to create Mock Env: ${createResult.error}`);
       }
     }
 
@@ -1898,16 +1879,28 @@ export const provisionWorkspace = async (
     if (mockEnvVarMap.size > 0) {
       onProgress?.({ phase: "collectionVars", message: "Updating collection variables...", progress: 77 });
       for (const [collUid, hvData] of collectionHostVars) {
-        if (!hvData.hostVariables.length || !hvData.collectionDetails) continue;
+        if (!hvData.collectionDetails) continue;
         const existingVars: any[] = hvData.collectionDetails.variable || [];
-        const updatedVars = existingVars.map((v: any) => {
-          const hv = hvData.hostVariables.find((h) => h.varName === v.key);
-          if (hv) {
-            const mockEnvVarName = mockEnvVarMap.get(`${collUid}:${hv.varName}`);
-            if (mockEnvVarName) return { ...v, value: `{{${mockEnvVarName}}}` };
-          }
-          return v;
-        });
+        const hostVars = hvData.hostVariables || [];
+        let updatedVars: any[];
+        if (hostVars.length > 0) {
+          updatedVars = existingVars.map((v: any) => {
+            const hv = hostVars.find((h) => h.varName === v.key);
+            if (hv) {
+              const mockEnvVarName = mockEnvVarMap.get(`${collUid}:${hv.varName}`);
+              if (mockEnvVarName) return { ...v, value: `{{${mockEnvVarName}}}` };
+            }
+            return v;
+          });
+        } else {
+          const mockEnvVarName = mockEnvVarMap.get(`${collUid}:__fallback__`);
+          if (!mockEnvVarName) continue;
+          const targetVar = existingVars.find((v: any) => COMMON_HOST_VAR_NAMES.includes(v.key));
+          if (!targetVar) continue;
+          updatedVars = existingVars.map((v: any) =>
+            v.key === targetVar.key ? { ...v, value: `{{${mockEnvVarName}}}` } : v
+          );
+        }
         const patchResult = await patchCollectionVariables(collUid, updatedVars);
         if (!patchResult.success) {
           results.errors.push(`Failed to update variables for collection ${collUid}: ${patchResult.error}`);
@@ -2393,7 +2386,7 @@ export const provisionCustomWorkspace = async (
       }
 
       if (createMockEnv && results.mocks.urls.length > 0) {
-        onProgress?.({ phase: "mockEnv", message: "Updating Mock Environment...", progress: 75 });
+        onProgress?.({ phase: "mockEnv", message: "Creating Mock Environment...", progress: 75 });
         const customMockEnvVarMap = new Map<string, string>();
         const mockVariables: EnvironmentVariable[] = [];
         for (const mockEntry of results.mocks.urls as any[]) {
@@ -2406,6 +2399,10 @@ export const provisionCustomWorkspace = async (
               type: "default",
               enabled: true,
             });
+            const collUid = results.collections.successData.find(
+              (c) => c.name === mockEntry.collectionName
+            )?.uid;
+            if (collUid) customMockEnvVarMap.set(`${collUid}:__fallback__`, varName);
           } else {
             for (const hv of hostVars) {
               const collectionPart = toCamelCase(mockEntry.collectionName);
@@ -2413,7 +2410,7 @@ export const provisionCustomWorkspace = async (
               const envVarName = collectionPart + varPart;
               mockVariables.push({
                 key: envVarName,
-                value: (mockEntry.mockUrl ?? "") + hv.path,
+                value: mockEntry.mockUrl ?? "",
                 type: "default",
                 enabled: true,
               });
@@ -2425,55 +2422,39 @@ export const provisionCustomWorkspace = async (
           }
         }
 
-        let mockEnv: { targetUid: string; name: string } | null = null;
-        for (const envData of Array.from(envMap.values())) {
-          if (
-            MOCK_ENV_NAMES.some(
-              (n) => envData.name.toLowerCase() === n.toLowerCase()
-            )
-          ) {
-            mockEnv = envData;
-            break;
-          }
-        }
-        if (mockEnv) {
-          const ed = await getEnvironmentDetails(mockEnv.targetUid);
-          const ur = await updateEnvironment(mockEnv.targetUid, mockEnv.name, [
-            ...(ed?.values ?? []),
-            ...mockVariables,
-          ]);
-          if (ur.success) {
-            results.mockEnv = { success: true, action: "updated" };
-          } else {
-            results.errors.push(`Failed to update Mock Env: ${ur.error}`);
-          }
+        const cr = await createEnvironmentInPostman("Mock Env", mockVariables, workspaceId!);
+        if (cr.success) {
+          results.mockEnv = { success: true, action: "created" };
         } else {
-          const cr = await createEnvironmentInPostman(
-            "Mock Env",
-            mockVariables,
-            workspaceId!
-          );
-          if (cr.success) {
-            results.mockEnv = { success: true, action: "created" };
-          } else {
-            results.errors.push(`Failed to create Mock Env: ${cr.error}`);
-          }
+          results.errors.push(`Failed to create Mock Env: ${cr.error}`);
         }
 
         // Update collection variables to reference mock env variable names
         if (customMockEnvVarMap.size > 0) {
           onProgress?.({ phase: "collectionVars", message: "Updating collection variables...", progress: 77 });
           for (const [collUid, hvData] of customCollectionHostVars) {
-            if (!hvData.hostVariables.length || !hvData.collectionDetails) continue;
+            if (!hvData.collectionDetails) continue;
             const existingVars: any[] = hvData.collectionDetails.variable || [];
-            const updatedVars = existingVars.map((v: any) => {
-              const hv = hvData.hostVariables.find((h) => h.varName === v.key);
-              if (hv) {
-                const mockEnvVarName = customMockEnvVarMap.get(`${collUid}:${hv.varName}`);
-                if (mockEnvVarName) return { ...v, value: `{{${mockEnvVarName}}}` };
-              }
-              return v;
-            });
+            const hostVars = hvData.hostVariables || [];
+            let updatedVars: any[];
+            if (hostVars.length > 0) {
+              updatedVars = existingVars.map((v: any) => {
+                const hv = hostVars.find((h) => h.varName === v.key);
+                if (hv) {
+                  const mockEnvVarName = customMockEnvVarMap.get(`${collUid}:${hv.varName}`);
+                  if (mockEnvVarName) return { ...v, value: `{{${mockEnvVarName}}}` };
+                }
+                return v;
+              });
+            } else {
+              const mockEnvVarName = customMockEnvVarMap.get(`${collUid}:__fallback__`);
+              if (!mockEnvVarName) continue;
+              const targetVar = existingVars.find((v: any) => COMMON_HOST_VAR_NAMES.includes(v.key));
+              if (!targetVar) continue;
+              updatedVars = existingVars.map((v: any) =>
+                v.key === targetVar.key ? { ...v, value: `{{${mockEnvVarName}}}` } : v
+              );
+            }
             const patchResult = await patchCollectionVariables(collUid, updatedVars);
             if (!patchResult.success) {
               results.errors.push(`Failed to update variables for collection ${collUid}: ${patchResult.error}`);

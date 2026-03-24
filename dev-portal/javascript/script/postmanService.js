@@ -9,7 +9,7 @@ const POSTMAN_TARGET_WORKSPACE_ID = process.env.POSTMAN_TARGET_WORKSPACE_ID;
 const POSTMAN_SOURCE_WORKSPACE_ID = process.env.POSTMAN_SOURCE_WORKSPACE_ID;
 const POSTMAN_API_BASE = "https://api.getpostman.com";
 
-const MOCK_ENV_NAMES = ["Mock Env", "Mock Environment", "Test Env", "Test Environment"];
+const COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url'];
 
 const headers = () => ({
   "Content-Type": "application/json",
@@ -63,14 +63,21 @@ const extractHostVariables = (collection) => {
   }
   traverse(collection.item || []);
   const collectionVars = collection.variable || [];
-  return Array.from(hostVarNames)
-    .map(varName => {
+
+  if (hostVarNames.size > 0) {
+    const allMapped = Array.from(hostVarNames).map(varName => {
       const varDef = collectionVars.find(v => v.key === varName);
       const originalUrl = varDef?.value || '';
-      const path = extractUrlPath(originalUrl);
-      return { varName, originalUrl, path };
-    })
-    .filter(hv => hv.originalUrl.includes('://'));
+      return { varName, originalUrl, path: extractUrlPath(originalUrl) };
+    });
+    const withProtocol = allMapped.filter(hv => hv.originalUrl.includes('://'));
+    if (withProtocol.length > 0) return withProtocol;
+    return allMapped.map(hv => ({ ...hv, path: '' }));
+  }
+
+  return collectionVars
+    .filter(v => COMMON_HOST_VAR_NAMES.includes(v.key))
+    .map(v => ({ varName: v.key, originalUrl: v.value || '', path: '' }));
 };
 
 // ============================================================================
@@ -1155,8 +1162,8 @@ export const provisionWorkspace = async (options, onProgress) => {
       await delay(300);
     }
 
-    // Step 5: Update/Create Mock Env
-    onProgress?.({ phase: "mockEnv", message: "Updating Mock Environment...", progress: 75 });
+    // Step 5: Create fresh Mock Env
+    onProgress?.({ phase: "mockEnv", message: "Creating Mock Environment...", progress: 75 });
     const mockEnvVarMap = new Map();
     if (results.mocks.urls.length > 0) {
       const toCamelCase = (name) => {
@@ -1171,48 +1178,50 @@ export const provisionWorkspace = async (options, onProgress) => {
         if (hostVars.length === 0) {
           const varName = toCamelCase(mock.collectionName) + 'BaseUrl';
           mockVariables.push({ key: varName, value: mock.mockUrl, type: 'default', enabled: true });
+          mockEnvVarMap.set(`${mock.targetUid}:__fallback__`, varName);
         } else {
           for (const hv of hostVars) {
             const envVarName = toCamelCase(mock.collectionName) + toPascalCase(hv.varName);
-            mockVariables.push({ key: envVarName, value: mock.mockUrl + hv.path, type: 'default', enabled: true });
+            mockVariables.push({ key: envVarName, value: mock.mockUrl, type: 'default', enabled: true });
             mockEnvVarMap.set(`${mock.targetUid}:${hv.varName}`, envVarName);
           }
         }
       }
 
-      let mockEnv = null;
-      for (const [, envData] of envMap) {
-        if (MOCK_ENV_NAMES.some((name) => envData.name.toLowerCase() === name.toLowerCase())) { mockEnv = envData; break; }
-      }
-      if (mockEnv) {
-        const envDetails = await getEnvironmentDetails(mockEnv.targetUid);
-        const mergedValues = [...(envDetails?.values || []), ...mockVariables];
-        const updateResult = await updateEnvironment(mockEnv.targetUid, mockEnv.name, mergedValues);
-        if (updateResult.success) { results.mockEnv = { success: true, action: "updated" }; }
-        else { results.errors.push(`Failed to update Mock Env: ${updateResult.error}`); }
-      } else {
-        const createResult = await createEnvironmentInPostman("Mock Env", mockVariables, workspaceId);
-        if (createResult.success) { results.mockEnv = { success: true, action: "created" }; }
-        else { results.errors.push(`Failed to create Mock Env: ${createResult.error}`); }
-      }
+      const createResult = await createEnvironmentInPostman("Mock Env", mockVariables, workspaceId);
+      if (createResult.success) { results.mockEnv = { success: true, action: "created" }; }
+      else { results.errors.push(`Failed to create Mock Env: ${createResult.error}`); }
     }
 
     // Step 5b: Update collection variables to reference mock env
     if (mockEnvVarMap.size > 0) {
       onProgress?.({ phase: "collectionVars", message: "Updating collection variables...", progress: 78 });
       for (const coll of results.collections.successData) {
-        if (!coll.hostVariables || coll.hostVariables.length === 0) continue;
         if (!coll.collectionDetails) continue;
         const existingVars = coll.collectionDetails.variable || [];
-        const updatedVars = existingVars.map(v => {
-          const hv = coll.hostVariables.find(h => h.varName === v.key);
-          if (hv) {
-            const envName = mockEnvVarMap.get(`${coll.uid}:${hv.varName}`);
-            if (envName) return { ...v, value: `{{${envName}}}` };
+        const hostVars = coll.hostVariables || [];
+
+        if (hostVars.length > 0) {
+          const updatedVars = existingVars.map(v => {
+            const hv = hostVars.find(h => h.varName === v.key);
+            if (hv) {
+              const envName = mockEnvVarMap.get(`${coll.uid}:${hv.varName}`);
+              if (envName) return { ...v, value: `{{${envName}}}` };
+            }
+            return v;
+          });
+          await patchCollectionVariables(coll.uid, updatedVars);
+        } else {
+          const fallbackEnvVarName = mockEnvVarMap.get(`${coll.uid}:__fallback__`);
+          if (!fallbackEnvVarName) continue;
+          const matchedVar = existingVars.find(v => COMMON_HOST_VAR_NAMES.includes(v.key));
+          if (matchedVar) {
+            const updatedVars = existingVars.map(v =>
+              v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
+            );
+            await patchCollectionVariables(coll.uid, updatedVars);
           }
-          return v;
-        });
-        await patchCollectionVariables(coll.uid, updatedVars);
+        }
         await delay(300);
       }
     }
@@ -1512,7 +1521,7 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
 
       const customMockEnvVarMap = new Map();
       if (createMockEnv && results.mocks.urls.length > 0) {
-        onProgress?.({ phase: "mockEnv", message: "Updating Mock Environment...", progress: 75 });
+        onProgress?.({ phase: "mockEnv", message: "Creating Mock Environment...", progress: 75 });
         const toCamelCase = (name) => {
           return name.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/)
             .map((word, i) => i === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
@@ -1525,42 +1534,48 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
           if (hostVars.length === 0) {
             const varName = toCamelCase(mock.collectionName) + 'BaseUrl';
             mockVariables.push({ key: varName, value: mock.mockUrl, type: 'default', enabled: true });
+            customMockEnvVarMap.set(`${mock.targetUid}:__fallback__`, varName);
           } else {
             for (const hv of hostVars) {
               const envVarName = toCamelCase(mock.collectionName) + toPascalCase(hv.varName);
-              mockVariables.push({ key: envVarName, value: mock.mockUrl + hv.path, type: 'default', enabled: true });
+              mockVariables.push({ key: envVarName, value: mock.mockUrl, type: 'default', enabled: true });
               customMockEnvVarMap.set(`${mock.targetUid}:${hv.varName}`, envVarName);
             }
           }
         }
 
-        let mockEnv = null;
-        for (const [, envData] of envMap) { if (MOCK_ENV_NAMES.some((n) => envData.name.toLowerCase() === n.toLowerCase())) { mockEnv = envData; break; } }
-        if (mockEnv) {
-          const ed = await getEnvironmentDetails(mockEnv.targetUid);
-          const ur = await updateEnvironment(mockEnv.targetUid, mockEnv.name, [...(ed?.values || []), ...mockVariables]);
-          if (ur.success) results.mockEnv = { success: true, action: "updated" }; else results.errors.push(`Failed to update Mock Env: ${ur.error}`);
-        } else {
-          const cr = await createEnvironmentInPostman("Mock Env", mockVariables, workspaceId);
-          if (cr.success) results.mockEnv = { success: true, action: "created" }; else results.errors.push(`Failed to create Mock Env: ${cr.error}`);
-        }
+        const cr = await createEnvironmentInPostman("Mock Env", mockVariables, workspaceId);
+        if (cr.success) results.mockEnv = { success: true, action: "created" }; else results.errors.push(`Failed to create Mock Env: ${cr.error}`);
       }
 
       if (customMockEnvVarMap.size > 0) {
         onProgress?.({ phase: "collectionVars", message: "Updating collection variables...", progress: 78 });
         for (const coll of results.collections.successData) {
-          if (!coll.hostVariables || coll.hostVariables.length === 0) continue;
           if (!coll.collectionDetails) continue;
           const existingVars = coll.collectionDetails.variable || [];
-          const updatedVars = existingVars.map(v => {
-            const hv = coll.hostVariables.find(h => h.varName === v.key);
-            if (hv) {
-              const envName = customMockEnvVarMap.get(`${coll.uid}:${hv.varName}`);
-              if (envName) return { ...v, value: `{{${envName}}}` };
+          const hostVars = coll.hostVariables || [];
+
+          if (hostVars.length > 0) {
+            const updatedVars = existingVars.map(v => {
+              const hv = hostVars.find(h => h.varName === v.key);
+              if (hv) {
+                const envName = customMockEnvVarMap.get(`${coll.uid}:${hv.varName}`);
+                if (envName) return { ...v, value: `{{${envName}}}` };
+              }
+              return v;
+            });
+            await patchCollectionVariables(coll.uid, updatedVars);
+          } else {
+            const fallbackEnvVarName = customMockEnvVarMap.get(`${coll.uid}:__fallback__`);
+            if (!fallbackEnvVarName) continue;
+            const matchedVar = existingVars.find(v => COMMON_HOST_VAR_NAMES.includes(v.key));
+            if (matchedVar) {
+              const updatedVars = existingVars.map(v =>
+                v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
+              );
+              await patchCollectionVariables(coll.uid, updatedVars);
             }
-            return v;
-          });
-          await patchCollectionVariables(coll.uid, updatedVars);
+          }
           await delay(300);
         }
       }

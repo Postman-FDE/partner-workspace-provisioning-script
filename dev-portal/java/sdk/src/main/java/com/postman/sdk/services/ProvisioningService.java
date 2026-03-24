@@ -19,6 +19,11 @@ import java.util.regex.Pattern;
 @Service
 public class ProvisioningService {
 
+    private static final List<String> COMMON_HOST_VAR_NAMES = List.of(
+            "baseUrl", "baseurl", "base_url", "HostName", "hostname", "host",
+            "apiUrl", "apiurl", "api_url", "serverUrl", "serverurl", "server_url"
+    );
+
     private final PostmanClient client;
     private final SpecService specService;
 
@@ -177,24 +182,6 @@ public class ProvisioningService {
             return Mono.empty();
         }
 
-        Optional<EnvironmentMapping> mockEnvMapping = ctx.environmentMappings.values().stream()
-            .filter(m -> List.of("Mock Env", "Mock Environment", "Test Env").stream()
-                .anyMatch(name -> m.name().equalsIgnoreCase(name)))
-            .findFirst();
-
-        if (mockEnvMapping.isPresent()) {
-            return client.getEnvironmentDetails(mockEnvMapping.get().targetUid())
-                .flatMap(details -> {
-                    if (details == null) return Mono.empty();
-                    List<Environment.EnvironmentVariable> merged = mergeVariables(details.values(), mockUrlVars);
-                    return client.updateEnvironment(
-                        mockEnvMapping.get().targetUid(),
-                        mockEnvMapping.get().name(),
-                        merged
-                    ).then();
-                });
-        }
-
         return client.createEnvironment("Mock Env", mockUrlVars, ctx.targetWorkspaceId).then();
     }
 
@@ -215,14 +202,13 @@ public class ProvisioningService {
             if (hostVars.isEmpty()) {
                 String varName = collectionCamel + "BaseUrl";
                 variables.add(new Environment.EnvironmentVariable(varName, mock.mockUrl(), "default", true));
+                mockEnvVarMap.put(collectionUid + ":__fallback__", varName);
             } else {
                 for (Map<String, String> hostVar : hostVars) {
                     String originalVarName = hostVar.get("varName");
-                    String path = hostVar.get("path");
                     String envVarName = collectionCamel + toPascalCase(originalVarName);
-                    String mockUrlWithPath = mock.mockUrl() + (path != null ? path : "");
 
-                    variables.add(new Environment.EnvironmentVariable(envVarName, mockUrlWithPath, "default", true));
+                    variables.add(new Environment.EnvironmentVariable(envVarName, mock.mockUrl(), "default", true));
                     mockEnvVarMap.put(collectionUid + ":" + originalVarName, envVarName);
                 }
             }
@@ -277,17 +263,35 @@ public class ProvisioningService {
 
         List<Map<String, Object>> collectionVars = (List<Map<String, Object>>) collection.getOrDefault("variable", List.of());
         List<Map<String, String>> result = new ArrayList<>();
-        for (String varName : hostVarNames) {
-            Map<String, Object> varDef = collectionVars.stream()
-                .filter(v -> varName.equals(v.get("key")))
-                .findFirst().orElse(null);
-            String originalUrl = varDef != null ? String.valueOf(varDef.getOrDefault("value", "")) : "";
-            if (originalUrl.contains("://")) {
-                String path = extractUrlPath(originalUrl);
+        if (!hostVarNames.isEmpty()) {
+            for (String varName : hostVarNames) {
+                Map<String, Object> varDef = collectionVars.stream()
+                    .filter(v -> varName.equals(v.get("key")))
+                    .findFirst().orElse(null);
+                String originalUrl = varDef != null ? String.valueOf(varDef.getOrDefault("value", "")) : "";
+                String path = originalUrl.contains("://") ? extractUrlPath(originalUrl) : "";
                 result.add(Map.of("varName", varName, "originalUrl", originalUrl, "path", path));
+            }
+        } else {
+            for (Map<String, Object> varDef : collectionVars) {
+                String key = String.valueOf(varDef.getOrDefault("key", ""));
+                if (matchesCommonHostVarName(key)) {
+                    String originalUrl = String.valueOf(varDef.getOrDefault("value", ""));
+                    String path = originalUrl.contains("://") ? extractUrlPath(originalUrl) : "";
+                    result.add(Map.of("varName", key, "originalUrl", originalUrl, "path", path));
+                }
             }
         }
         return result;
+    }
+
+    private static boolean matchesCommonHostVarName(String key) {
+        for (String name : COMMON_HOST_VAR_NAMES) {
+            if (name.equalsIgnoreCase(key)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @SuppressWarnings("unchecked")
@@ -317,19 +321,6 @@ public class ProvisioningService {
         }
     }
 
-    private List<Environment.EnvironmentVariable> mergeVariables(List<Environment.EnvironmentVariable> existing, List<Environment.EnvironmentVariable> newVars) {
-        Map<String, Environment.EnvironmentVariable> merged = new LinkedHashMap<>();
-        if (existing != null) {
-            for (Environment.EnvironmentVariable v : existing) {
-                merged.put(v.key(), v);
-            }
-        }
-        for (Environment.EnvironmentVariable v : newVars) {
-            merged.put(v.key(), v);
-        }
-        return new ArrayList<>(merged.values());
-    }
-
     @SuppressWarnings("unchecked")
     private Mono<Void> updateCollectionVariables(ProvisioningContext ctx) {
         ctx.emitProgress("collectionVars", "Updating collection variables...");
@@ -344,27 +335,50 @@ public class ProvisioningService {
                 String targetUid = mapping.targetUid();
                 List<Map<String, String>> hostVars = ctx.collectionHostVars.getOrDefault(targetUid, List.of());
                 Map<String, Object> details = ctx.collectionDetails.getOrDefault(targetUid, Map.of());
-                if (hostVars.isEmpty() || details.isEmpty()) {
+                if (details.isEmpty()) {
                     return Mono.empty();
                 }
 
                 List<Map<String, Object>> existingVars = (List<Map<String, Object>>) details.getOrDefault("variable", List.of());
                 List<Map<String, Object>> updatedVars = new ArrayList<>();
-                for (Map<String, Object> v : existingVars) {
-                    String key = String.valueOf(v.getOrDefault("key", ""));
-                    Map<String, String> hv = hostVars.stream()
-                        .filter(h -> key.equals(h.get("varName")))
-                        .findFirst().orElse(null);
-                    if (hv != null) {
-                        String envName = ctx.mockEnvVarMap.get(targetUid + ":" + hv.get("varName"));
-                        if (envName != null) {
+
+                if (!hostVars.isEmpty()) {
+                    for (Map<String, Object> v : existingVars) {
+                        String key = String.valueOf(v.getOrDefault("key", ""));
+                        Map<String, String> hv = hostVars.stream()
+                            .filter(h -> key.equals(h.get("varName")))
+                            .findFirst().orElse(null);
+                        if (hv != null) {
+                            String envName = ctx.mockEnvVarMap.get(targetUid + ":" + hv.get("varName"));
+                            if (envName != null) {
+                                Map<String, Object> updated = new HashMap<>(v);
+                                updated.put("value", "{{" + envName + "}}");
+                                updatedVars.add(updated);
+                                continue;
+                            }
+                        }
+                        updatedVars.add(v);
+                    }
+                } else {
+                    String fallbackEnvName = ctx.mockEnvVarMap.get(targetUid + ":__fallback__");
+                    if (fallbackEnvName == null) {
+                        return Mono.empty();
+                    }
+                    boolean found = false;
+                    for (Map<String, Object> v : existingVars) {
+                        String key = String.valueOf(v.getOrDefault("key", ""));
+                        if (!found && matchesCommonHostVarName(key)) {
                             Map<String, Object> updated = new HashMap<>(v);
-                            updated.put("value", "{{" + envName + "}}");
+                            updated.put("value", "{{" + fallbackEnvName + "}}");
                             updatedVars.add(updated);
-                            continue;
+                            found = true;
+                        } else {
+                            updatedVars.add(v);
                         }
                     }
-                    updatedVars.add(v);
+                    if (!found) {
+                        return Mono.empty();
+                    }
                 }
 
                 if (updatedVars.isEmpty()) {

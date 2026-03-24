@@ -27,6 +27,8 @@ from postman_sdk.types import (
 
 ProgressCallback = Callable[[ProgressEvent], None]
 
+COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url']
+
 
 class ProvisioningService:
     """Provisioning Service for workspace setup"""
@@ -41,7 +43,6 @@ class ProvisioningService:
         admin_user_ids: list[str] | None = None,
         partner_emails: list[str] | None = None,
         partner_role_id: str = WorkspaceRoleId.PARTNER_EDITOR_AND_LEAD,
-        mock_env_names: list[str] | None = None,
         on_progress: ProgressCallback | None = None,
     ):
         self.client = client
@@ -52,7 +53,6 @@ class ProvisioningService:
         self.admin_user_ids = admin_user_ids or []
         self.partner_emails = partner_emails or []
         self.partner_role_id = partner_role_id
-        self.mock_env_names = mock_env_names or ["Mock Env", "Mock Environment", "Test Env"]
         self.on_progress = on_progress
 
         # Internal state
@@ -247,19 +247,7 @@ class ProvisioningService:
         if not mock_url_variables:
             return mock_env_var_map
 
-        mock_env_mapping = None
-        for mapping in self._environment_mappings.values():
-            if any(mapping.name.lower() == name.lower() for name in self.mock_env_names):
-                mock_env_mapping = mapping
-                break
-
-        if mock_env_mapping:
-            details = await self.client.get_environment_details(mock_env_mapping.target_uid)
-            if details:
-                merged = self._merge_variables(details.values or [], mock_url_variables)
-                await self.client.update_environment(mock_env_mapping.target_uid, mock_env_mapping.name, merged)
-        else:
-            await self.client.create_environment("Mock Env", mock_url_variables, target_workspace_id)
+        await self.client.create_environment("Mock Env", mock_url_variables, target_workspace_id)
 
         return mock_env_var_map
 
@@ -267,22 +255,36 @@ class ProvisioningService:
         if not mock_env_var_map:
             return
 
+        common_lower = {n.lower() for n in COMMON_HOST_VAR_NAMES}
+
         for coll_mapping in self._collection_mappings.values():
             host_vars = coll_mapping.host_variables or []
             coll_details = coll_mapping.collection_details
-            if not host_vars or not coll_details:
+            if not coll_details:
                 continue
 
             existing_vars = coll_details.get('variable', [])
             updated_vars = []
-            for v in existing_vars:
-                hv = next((h for h in host_vars if h.var_name == v.get('key')), None)
-                if hv:
-                    env_name = mock_env_var_map.get(f"{coll_mapping.target_uid}:{hv.var_name}")
-                    if env_name:
+
+            if host_vars:
+                for v in existing_vars:
+                    hv = next((h for h in host_vars if h.var_name == v.get('key')), None)
+                    if hv:
+                        env_name = mock_env_var_map.get(f"{coll_mapping.target_uid}:{hv.var_name}")
+                        if env_name:
+                            updated_vars.append({**v, 'value': f'{{{{{env_name}}}}}'})
+                            continue
+                    updated_vars.append(v)
+            else:
+                env_name = mock_env_var_map.get(f"{coll_mapping.target_uid}:__fallback__")
+                if not env_name:
+                    continue
+                for v in existing_vars:
+                    key = v.get('key')
+                    if key and key.lower() in common_lower:
                         updated_vars.append({**v, 'value': f'{{{{{env_name}}}}}'})
-                        continue
-                updated_vars.append(v)
+                    else:
+                        updated_vars.append(v)
 
             await self.client.patch_collection_variables(coll_mapping.target_uid, updated_vars)
 
@@ -299,11 +301,12 @@ class ProvisioningService:
             if not host_vars:
                 var_name = self._to_variable_name(coll_mapping.name) + 'BaseUrl'
                 variables.append(EnvironmentVariable(key=var_name, value=mock_mapping.mock_url, enabled=True))
+                mock_env_var_map[f"{coll_mapping.target_uid}:__fallback__"] = var_name
                 continue
 
             for hv in host_vars:
                 env_var_name = self._to_variable_name(coll_mapping.name) + self._to_pascal_case(hv.var_name)
-                variables.append(EnvironmentVariable(key=env_var_name, value=mock_mapping.mock_url + hv.path, enabled=True))
+                variables.append(EnvironmentVariable(key=env_var_name, value=mock_mapping.mock_url, enabled=True))
                 mock_env_var_map[f"{coll_mapping.target_uid}:{hv.var_name}"] = env_var_name
 
         return variables, mock_env_var_map
@@ -347,29 +350,31 @@ class ProvisioningService:
         traverse(collection.get('item', []))
 
         collection_vars = collection.get('variable', [])
-        result = []
-        for var_name in host_var_names:
-            var_def = next((v for v in collection_vars if v.get('key') == var_name), None)
-            original_url = var_def.get('value', '') if var_def else ''
+        result: list[HostVariableInfo] = []
+
+        if host_var_names:
+            for var_name in host_var_names:
+                var_def = next((v for v in collection_vars if v.get('key') == var_name), None)
+                original_url = var_def.get('value', '') if var_def else ''
+                if '://' in original_url:
+                    path = self._extract_url_path(original_url)
+                else:
+                    path = ''
+                result.append(HostVariableInfo(var_name=var_name, original_url=original_url, path=path))
+            return result
+
+        common_lower = {n.lower() for n in COMMON_HOST_VAR_NAMES}
+        for v in collection_vars:
+            key = v.get('key')
+            if not key or key.lower() not in common_lower:
+                continue
+            original_url = v.get('value', '')
             if '://' in original_url:
                 path = self._extract_url_path(original_url)
-                result.append(HostVariableInfo(var_name=var_name, original_url=original_url, path=path))
+            else:
+                path = ''
+            result.append(HostVariableInfo(var_name=key, original_url=original_url, path=path))
         return result
-
-    def _merge_variables(
-        self, existing: list[EnvironmentVariable], new_vars: list[EnvironmentVariable]
-    ) -> list[EnvironmentVariable]:
-        merged = list(existing)
-        for new_var in new_vars:
-            found = False
-            for i, v in enumerate(merged):
-                if v.key == new_var.key:
-                    merged[i] = new_var
-                    found = True
-                    break
-            if not found:
-                merged.append(new_var)
-        return merged
 
     async def _copy_specs(self, target_workspace_id: str, result: dict[str, Any]) -> None:
         source_specs = await self.client.get_specs(self.source_workspace_id)

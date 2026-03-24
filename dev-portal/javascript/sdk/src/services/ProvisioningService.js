@@ -63,6 +63,21 @@
  * @property {Array} errors
  */
 
+const COMMON_HOST_VAR_NAMES = [
+  'baseUrl',
+  'baseurl',
+  'base_url',
+  'HostName',
+  'hostname',
+  'host',
+  'apiUrl',
+  'apiurl',
+  'api_url',
+  'serverUrl',
+  'serverurl',
+  'server_url',
+];
+
 /**
  * High-level provisioning workflow service
  */
@@ -70,13 +85,11 @@ export class ProvisioningService {
   /**
    * @param {PostmanClient} client
    * @param {Object} [config]
-   * @param {string[]} [config.mockEnvNames] - Environment names to update with mock URLs
    * @param {string} [config.partnerRoleId='7'] - Default partner role ID
    * @param {string} [config.adminRoleId='3'] - Default admin role ID
    */
   constructor(client, config = {}) {
     this.client = client;
-    this.mockEnvNames = config.mockEnvNames || ['Mock Env', 'Mock Environment', 'Test Env', 'Test Environment'];
     this.partnerRoleId = config.partnerRoleId || '7';
     this.adminRoleId = config.adminRoleId || '3';
   }
@@ -496,30 +509,9 @@ export class ProvisioningService {
       return mockEnvVarMap;
     }
 
-    // Find existing mock env
-    const mockEnvMapping = Array.from(store.environments.values()).find(e =>
-      this.mockEnvNames.some(name => name.toLowerCase() === e.name.toLowerCase())
-    );
-
-    if (mockEnvMapping) {
-      // Update existing
-      const details = await this.client.getEnvironmentDetails(mockEnvMapping.targetUid);
-      if (details) {
-        const mergedVars = this._mergeVariables(details.values || [], mockUrlVars);
-        const updateResult = await this.client.updateEnvironment(
-          mockEnvMapping.targetUid,
-          details.name,
-          mergedVars
-        );
-        result.mockEnv.success = updateResult.success;
-        result.mockEnv.action = 'updated';
-      }
-    } else {
-      // Create new
-      const createResult = await this.client.createEnvironment('Mock Env', mockUrlVars, targetWorkspaceId);
-      result.mockEnv.success = createResult.success;
-      result.mockEnv.action = 'created';
-    }
+    const createResult = await this.client.createEnvironment('Mock Env', mockUrlVars, targetWorkspaceId);
+    result.mockEnv.success = createResult.success;
+    result.mockEnv.action = 'created';
 
     return mockEnvVarMap;
   }
@@ -528,15 +520,37 @@ export class ProvisioningService {
     if (!mockEnvVarMap || mockEnvVarMap.size === 0) return;
 
     for (const [, collData] of store.collections) {
-      if (!collData.hostVariables || collData.hostVariables.length === 0) continue;
       if (!collData.collectionDetails) continue;
 
+      const hostVars = collData.hostVariables || [];
       const existingVars = collData.collectionDetails.variable || [];
+
+      if (hostVars.length > 0) {
+        const updatedVars = existingVars.map(v => {
+          const hv = hostVars.find(h => h.varName === v.key);
+          if (hv) {
+            const envName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
+            if (envName) return { ...v, value: `{{${envName}}}` };
+          }
+          return v;
+        });
+
+        await this.client.patchCollectionVariables(collData.targetUid, updatedVars);
+        await this._delay(300);
+        continue;
+      }
+
+      const fallbackEnvName = mockEnvVarMap.get(`${collData.targetUid}:__fallback__`);
+      if (!fallbackEnvName) continue;
+
+      const commonVar = existingVars.find(v =>
+        COMMON_HOST_VAR_NAMES.some(n => n.toLowerCase() === v.key.toLowerCase())
+      );
+      if (!commonVar) continue;
+
       const updatedVars = existingVars.map(v => {
-        const hv = collData.hostVariables.find(h => h.varName === v.key);
-        if (hv) {
-          const envName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
-          if (envName) return { ...v, value: `{{${envName}}}` };
+        if (v.key === commonVar.key) {
+          return { ...v, value: `{{${fallbackEnvName}}}` };
         }
         return v;
       });
@@ -558,12 +572,13 @@ export class ProvisioningService {
       if (hostVars.length === 0) {
         const varName = this._toVariableName(collData.name) + 'BaseUrl';
         variables.push({ key: varName, value: mockData.mockUrl, type: 'default', enabled: true });
+        mockEnvVarMap.set(`${collData.targetUid}:__fallback__`, varName);
         continue;
       }
 
       for (const hv of hostVars) {
         const envVarName = this._toVariableName(collData.name) + this._toPascalCase(hv.varName);
-        variables.push({ key: envVarName, value: mockData.mockUrl + hv.path, type: 'default', enabled: true });
+        variables.push({ key: envVarName, value: mockData.mockUrl, type: 'default', enabled: true });
         mockEnvVarMap.set(`${collData.targetUid}:${hv.varName}`, envVarName);
       }
     }
@@ -614,25 +629,33 @@ export class ProvisioningService {
     }
     traverse(collection.item || []);
     const collectionVars = collection.variable || [];
-    return Array.from(hostVarNames)
-      .map(varName => {
-        const varDef = collectionVars.find(v => v.key === varName);
-        const originalUrl = varDef?.value || '';
-        const path = this._extractUrlPath(originalUrl);
-        return { varName, originalUrl, path };
-      })
-      .filter(hv => hv.originalUrl.includes('://'));
-  }
 
-  _mergeVariables(existing, newVars) {
-    const merged = new Map();
-    for (const v of existing) {
-      merged.set(v.key, v);
+    const mapHostVar = varName => {
+      const varDef = collectionVars.find(v => v.key === varName);
+      const originalUrl = varDef?.value || '';
+      const path = this._extractUrlPath(originalUrl);
+      return { varName, originalUrl, path };
+    };
+
+    if (hostVarNames.size > 0) {
+      const mapped = Array.from(hostVarNames).map(mapHostVar);
+      const withProtocol = mapped.filter(hv => hv.originalUrl.includes('://'));
+      if (withProtocol.length > 0) return withProtocol;
+      return mapped.map(hv => ({ ...hv, path: '' }));
     }
-    for (const v of newVars) {
-      merged.set(v.key, v);
+
+    const common = [];
+    for (const v of collectionVars) {
+      if (COMMON_HOST_VAR_NAMES.some(n => n.toLowerCase() === v.key.toLowerCase())) {
+        const originalUrl = v.value || '';
+        common.push({
+          varName: v.key,
+          originalUrl,
+          path: originalUrl.includes('://') ? this._extractUrlPath(originalUrl) : '',
+        });
+      }
     }
-    return Array.from(merged.values());
+    return common;
   }
 
   async _copySpecs(sourceWorkspaceId, targetWorkspaceId, store, result, onProgress, selectedIds = null) {
