@@ -62,6 +62,8 @@ asyncio.run(main())
 - Pydantic v2 models for all API entities
 - Type hints throughout
 - High-level services for provisioning and reset workflows
+- Mock URL path resolution — extracts URL paths from collection host variables and appends them to mock server URLs
+- Collection variable mapping — patches forked collections to reference mock environment variables
 - Automatic retry with exponential backoff
 - Context manager support
 
@@ -88,6 +90,7 @@ asyncio.run(main())
 | **Partners** | `client.remove_partner()` | Remove partner from workspace |
 | **Collections** | `client.get_collections()` | Get all collections |
 | **Collections** | `client.fork_collection()` | Fork a collection |
+| **Collections** | `client.patch_collection_variables()` | Update collection variables |
 | **Collections** | `client.delete_collection()` | Delete a collection |
 | **Environments** | `client.get_environments()` | Get all environments |
 | **Environments** | `client.create_environment()` | Create environment |
@@ -104,7 +107,7 @@ asyncio.run(main())
 
 ### `ProvisioningService.provision()` - Full Provisioning
 
-Copies all collections, creates mocks, copies environments, copies specs, adds admins, and invites partners.
+Copies all collections, creates mocks, copies environments, creates a mock environment with path-resolved mock URLs, patches collection variables to reference the mock environment, copies specs, adds admins, and invites partners.
 
 ```python
 import asyncio
@@ -169,6 +172,7 @@ class ProvisioningResult(BaseModel):
     mocks: MockResult
     environments: ResourceResult
     mock_env: MockEnvResult
+    collection_variables: ResourceResult
     specs: ResourceResult
     admins: ResourceResult
     invitations: InvitationsResult
@@ -929,6 +933,7 @@ async with PostmanClient(
 | `create_mock(name, collection_uid, ws_id)` | `ApiResponse[MockServer]` | Create mock server |
 | `get_specs(workspace_id)` | `List[Spec]` | Get all specs |
 | `create_spec(ws_id, name, type, files)` | `ApiResponse[Spec]` | Create spec |
+| `patch_collection_variables(collection_uid, variables)` | `ApiResponse` | Update collection variables |
 | `invite_partner(ws_id, email, role_id)` | `InvitationResult` | Invite partner |
 
 ---
@@ -944,10 +949,11 @@ async with PostmanClient(
 | 3 | Collections | Fork collections (basis for mocks) |
 | 4 | Mock Servers | Create for each collection |
 | 5 | Environments | Copy with original variables |
-| 6 | Mock Environment | Update/create with mock URLs |
-| 7 | API Specs | Copy specification files |
-| 8 | Admins | Add team members as workspace admins |
-| 9 | Partners | Invite partners and generate invitation links |
+| 6 | Mock Environment | Create/update env with path-resolved mock URLs (e.g., `direct_debits_api_base_url`) |
+| 7 | Update Collection Variables | Patch forked collections to reference mock env variables |
+| 8 | API Specs | Copy specification files |
+| 9 | Admins | Add team members as workspace admins |
+| 10 | Partners | Invite partners and generate invitation links |
 
 ### Reset Order
 

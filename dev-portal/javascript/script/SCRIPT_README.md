@@ -30,10 +30,11 @@ This module automates the process of creating and managing Postman partner works
 2. Copy Collections       -> Fork all collections from source workspace
 3. Create Mock Servers    -> Generate mock servers for each collection
 4. Copy Environments      -> Duplicate environment configurations
-5. Update Mock Env        -> Create/update "Mock Env" with mock server URLs
-6. Copy API Specs         -> Transfer all API specification files
-7. Add Team Admins        -> Add internal team members as workspace admins
-8. Invite Partners        -> Send partner invitations with invitation links
+5. Update Mock Env        -> Create "Mock Env" with path-aware mock URLs
+6. Update Collection Vars -> Patch collection host variables to reference mock env
+7. Copy API Specs         -> Transfer all API specification files
+8. Add Team Admins        -> Add internal team members as workspace admins
+9. Invite Partners        -> Send partner invitations with invitation links
 ```
 
 ### Reset Workflow
@@ -48,7 +49,9 @@ Deletes workspace resources in reverse dependency order:
 
 ## Features
 
-- **Complete Workspace Provisioning** — collection forking, mock server creation, environment handling, API spec copying, team member management, partner invitation with "Run in Postman" links
+- **Complete Workspace Provisioning** — collection forking, mock server creation, environment handling, mock URL path resolution, collection variable mapping, API spec copying, team member management, partner invitation with "Run in Postman" links
+- **Mock URL Path Resolution** — inspects each collection's request URLs to find host variables (e.g. `{{HostName}}`, `{{baseUrl}}`), extracts the URL path from each variable's value, and appends it to the mock server URL
+- **Collection Variable Mapping** — after creating mock env variables, each forked collection is PATCHed to update its host variables to reference the corresponding mock env variable
 - **Custom Selection Provisioning** — choose specific asset types and individual items
 - **Safe Reset Functionality** — dependency-aware deletion order, selective deletion
 - **Flexible Configuration** — existing or new workspaces, env var config, multiple workspace types
@@ -280,7 +283,7 @@ All async functions accept a progress callback:
 
 ```javascript
 (progress) => {
-  progress.phase      // 'validation' | 'workspace' | 'collections' | 'mocks' | 'environments' | 'mockEnv' | 'specs' | 'admins' | 'partners' | 'complete' | 'error'
+  progress.phase      // 'validation' | 'workspace' | 'collections' | 'mocks' | 'environments' | 'mockEnv' | 'collectionVars' | 'specs' | 'admins' | 'partners' | 'complete' | 'error'
   progress.message    // Human-readable status message
   progress.progress   // Overall progress percentage (0-100)
   progress.current    // Current item number
@@ -314,10 +317,11 @@ try {
 3. **Collections** — Fork collections (basis for mocks)
 4. **Mock Servers** — Create for each collection
 5. **Environments** — Copy with original variables
-6. **Mock Environment** — Update/create with mock URLs
-7. **API Specs** — Copy specification files
-8. **Admins** — Add team members as workspace admins
-9. **Partners** — Invite partners and generate invitation links
+6. **Mock Environment** — Create with path-aware mock URLs (variable naming: `{camelCaseCollectionName}{PascalCaseVarName}`, e.g. `directDebitsApiBaseUrl`)
+7. **Collection Variables** — PATCH each collection's host variables to reference the corresponding mock env variable (e.g. `HostName` → `{{bankingHubHostName}}`)
+8. **API Specs** — Copy specification files
+9. **Admins** — Add team members as workspace admins
+10. **Partners** — Invite partners and generate invitation links
 
 ### Reset Order
 

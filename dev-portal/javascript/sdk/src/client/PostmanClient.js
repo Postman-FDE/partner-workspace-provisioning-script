@@ -289,6 +289,23 @@ export class PostmanClient {
     return response.success;
   }
 
+  /**
+   * Update a collection's variables via partial update
+   * PATCH /collections/{collectionId}
+   * @param {string} collectionUid
+   * @param {Array} variables - Full variable array to set
+   * @returns {Promise<{success: boolean, collection?: object, error?: string}>}
+   */
+  async patchCollectionVariables(collectionUid, variables) {
+    const response = await this.httpClient.patch(`/collections/${collectionUid}`, {
+      collection: { variable: variables },
+    });
+    if (response.success) {
+      return { success: true, collection: response.data?.collection };
+    }
+    return { success: false, error: response.error || 'Failed to patch collection variables' };
+  }
+
   // ==================== Environments ====================
 
   /**

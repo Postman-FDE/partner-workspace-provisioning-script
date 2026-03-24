@@ -22,7 +22,7 @@ The dev-portal provides Postman workspace provisioning tools in four languages. 
 
 - **Modular SDKs (`sdk/`)** — A properly structured package with separate modules for the HTTP client, service layer, and type definitions. Install as a dependency (or use one of the local integration methods documented in each SDK_INTEGRATION.md). Ideal for production applications, teams that value clean architecture, and projects that benefit from tree-shaking and type safety.
 
-Both approaches expose the same core functionality: full provisioning, custom provisioning, full reset, custom reset, admin management, and partner invitations.
+Both approaches expose the same core functionality: full provisioning (including mock URL path resolution and collection variable mapping), custom provisioning, full reset, custom reset, admin management, and partner invitations.
 
 ---
 
@@ -58,6 +58,8 @@ All languages support the same core features across both scripts and SDKs:
 |---------|----|----|--------|------|
 | Full Provisioning | ✅ | ✅ | ✅ | ✅ |
 | Custom Provisioning | ✅ | ✅ | ✅ | ✅ |
+| Mock URL Path Resolution | ✅ | ✅ | ✅ | ✅ |
+| Collection Variable Mapping | ✅ | ✅ | ✅ | ✅ |
 | Full Reset | ✅ | ✅ | ✅ | ✅ |
 | Custom Reset | ✅ | ✅ | ✅ | ✅ |
 | Partner Invitations | ✅ | ✅ | ✅ | ✅ |

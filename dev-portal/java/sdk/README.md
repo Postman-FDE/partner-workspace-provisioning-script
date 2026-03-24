@@ -118,7 +118,9 @@ public class PostmanConfig {
 | **Workspace** | `client.getWorkspace()` | `Mono<Workspace>` | Get workspace |
 | **Workspace** | `client.createWorkspace()` | `Mono<ApiResponse<Workspace>>` | Create workspace |
 | **Collections** | `client.getCollections()` | `Mono<List<Collection>>` | Get all collections |
+| **Collections** | `client.getCollectionDetails()` | `Mono<CollectionDetails>` | Get collection with variables |
 | **Collections** | `client.forkCollection()` | `Mono<ApiResponse<Collection>>` | Fork collection |
+| **Collections** | `client.patchCollectionVariables()` | `Mono<ApiResponse<?>>` | Update collection variables |
 | **Collections** | `client.deleteCollection()` | `Mono<Boolean>` | Delete collection |
 | **Environments** | `client.getEnvironments()` | `Mono<List<Environment>>` | Get environments |
 | **Environments** | `client.createEnvironment()` | `Mono<ApiResponse<Environment>>` | Create environment |
@@ -136,7 +138,7 @@ public class PostmanConfig {
 
 ### `ProvisioningService.provision()` - Full Provisioning
 
-Copies all collections, creates mocks, copies environments, copies specs, adds admins, and invites partners.
+Copies all collections, creates mocks, copies environments, creates a mock environment with path-resolved mock URLs, patches collection variables to reference the mock environment, copies specs, adds admins, and invites partners.
 
 ```java
 import com.postman.sdk.services.ProvisioningService;
@@ -207,6 +209,8 @@ public static class ProvisioningResult {
         public int success;
         public List<Map<String, String>> failed;
     }
+    
+    public ResourceResult collectionVariables;
     
     public static class InvitationsResult extends ResourceResult {
         public List<Map<String, String>> links;  // Partner invitation links
@@ -1031,6 +1035,8 @@ Main SDK client with reactive methods.
 | `createWorkspace(name, type, desc)` | `Mono<ApiResponse<Workspace>>` | Create workspace |
 | `getCollections(workspaceId)` | `Mono<List<Collection>>` | Get all collections |
 | `forkCollection(uid, label, targetId)` | `Mono<ApiResponse<Collection>>` | Fork a collection |
+| `getCollectionDetails(collectionUid)` | `Mono<CollectionDetails>` | Get collection with variables |
+| `patchCollectionVariables(collectionUid, variables)` | `Mono<ApiResponse<?>>` | Update collection variables |
 | `deleteCollection(uid)` | `Mono<Boolean>` | Delete collection |
 | `getEnvironments(workspaceId)` | `Mono<List<Environment>>` | Get all environments |
 | `createEnvironment(name, values, wsId)` | `Mono<ApiResponse<Environment>>` | Create environment |
@@ -1056,10 +1062,11 @@ Main SDK client with reactive methods.
 | 3 | Collections | Fork collections (basis for mocks) |
 | 4 | Mock Servers | Create for each collection |
 | 5 | Environments | Copy with original variables |
-| 6 | Mock Environment | Update/create with mock URLs |
-| 7 | API Specs | Copy specification files |
-| 8 | Admins | Add team members as workspace admins |
-| 9 | Partners | Invite partners and generate invitation links |
+| 6 | Mock Environment | Create/update env with path-resolved mock URLs (e.g., `directDebitsApiBaseUrl`) |
+| 7 | Update Collection Variables | Patch forked collections to reference mock env variables |
+| 8 | API Specs | Copy specification files |
+| 9 | Admins | Add team members as workspace admins |
+| 10 | Partners | Invite partners and generate invitation links |
 
 ### Reset Order
 

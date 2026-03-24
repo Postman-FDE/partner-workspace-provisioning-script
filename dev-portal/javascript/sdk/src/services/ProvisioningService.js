@@ -128,7 +128,10 @@ export class ProvisioningService {
 
       // Phase 6: Update mock environment
       this._emitProgress(onProgress, 'mockEnv', 'Updating mock environment...', 65);
-      await this._updateMockEnv(targetWorkspaceId, store, result);
+      const mockEnvVarMap = await this._updateMockEnv(targetWorkspaceId, store, result);
+
+      // Phase 6b: Update collection variables
+      await this._updateCollectionVariables(store, mockEnvVarMap);
 
       // Phase 7: Copy specs
       this._emitProgress(onProgress, 'specs', 'Copying API specs...', 70);
@@ -249,11 +252,15 @@ export class ProvisioningService {
       }
 
       // Update mock environment
+      let mockEnvVarMap;
       if (createMockEnv && copyMocks) {
         this._emitProgress(onProgress, 'mockEnv', 'Updating mock environment...', progress);
-        await this._updateMockEnv(targetWorkspaceId, store, result);
+        mockEnvVarMap = await this._updateMockEnv(targetWorkspaceId, store, result);
         progress += progressPerStep;
       }
+
+      // Update collection variables
+      await this._updateCollectionVariables(store, mockEnvVarMap);
 
       // Copy specs
       if (copySpecs) {
@@ -369,10 +376,19 @@ export class ProvisioningService {
           sourceUid: collection.uid,
           targetUid: forkResult.collection.uid,
         });
+
+        const collDetails = await this.client.getCollectionDetails(forkResult.collection.uid);
+        let hostVariables = [];
+        if (collDetails) {
+          hostVariables = this._extractHostVariables(collDetails);
+        }
+
         store.collections.set(collection.uid, {
           sourceUid: collection.uid,
           targetUid: forkResult.collection.uid,
           name: collection.name,
+          hostVariables,
+          collectionDetails: collDetails,
         });
       } else {
         result.collections.failed.push({
@@ -475,9 +491,9 @@ export class ProvisioningService {
   }
 
   async _updateMockEnv(targetWorkspaceId, store, result) {
-    const mockUrlVars = this._generateMockUrlVariables(store);
+    const { variables: mockUrlVars, mockEnvVarMap } = this._generateMockUrlVariables(store);
     if (mockUrlVars.length === 0) {
-      return;
+      return mockEnvVarMap;
     }
 
     // Find existing mock env
@@ -504,32 +520,55 @@ export class ProvisioningService {
       result.mockEnv.success = createResult.success;
       result.mockEnv.action = 'created';
     }
+
+    return mockEnvVarMap;
+  }
+
+  async _updateCollectionVariables(store, mockEnvVarMap) {
+    if (!mockEnvVarMap || mockEnvVarMap.size === 0) return;
+
+    for (const [, collData] of store.collections) {
+      if (!collData.hostVariables || collData.hostVariables.length === 0) continue;
+      if (!collData.collectionDetails) continue;
+
+      const existingVars = collData.collectionDetails.variable || [];
+      const updatedVars = existingVars.map(v => {
+        const hv = collData.hostVariables.find(h => h.varName === v.key);
+        if (hv) {
+          const envName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
+          if (envName) return { ...v, value: `{{${envName}}}` };
+        }
+        return v;
+      });
+
+      await this.client.patchCollectionVariables(collData.targetUid, updatedVars);
+      await this._delay(300);
+    }
   }
 
   _generateMockUrlVariables(store) {
     const variables = [];
-    
-    for (const mock of store.mocks.values()) {
-      const varName = this._toVariableName(mock.collectionName) + '_mockUrl';
-      variables.push({
-        key: varName,
-        value: mock.mockUrl,
-        type: 'default',
-        enabled: true,
-      });
+    const mockEnvVarMap = new Map();
+
+    for (const [sourceUid, collData] of store.collections) {
+      const mockData = Array.from(store.mocks.values()).find(m => m.collectionName === collData.name);
+      if (!mockData) continue;
+
+      const hostVars = collData.hostVariables || [];
+      if (hostVars.length === 0) {
+        const varName = this._toVariableName(collData.name) + 'BaseUrl';
+        variables.push({ key: varName, value: mockData.mockUrl, type: 'default', enabled: true });
+        continue;
+      }
+
+      for (const hv of hostVars) {
+        const envVarName = this._toVariableName(collData.name) + this._toPascalCase(hv.varName);
+        variables.push({ key: envVarName, value: mockData.mockUrl + hv.path, type: 'default', enabled: true });
+        mockEnvVarMap.set(`${collData.targetUid}:${hv.varName}`, envVarName);
+      }
     }
 
-    // Add baseUrl pointing to first mock
-    if (variables.length > 0) {
-      variables.unshift({
-        key: 'baseUrl',
-        value: variables[0].value,
-        type: 'default',
-        enabled: true,
-      });
-    }
-
-    return variables;
+    return { variables, mockEnvVarMap };
   }
 
   _toVariableName(name) {
@@ -539,6 +578,50 @@ export class ProvisioningService {
       if (i === 0) return word.toLowerCase();
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     }).join('');
+  }
+
+  _toPascalCase(str) {
+    return str
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[^a-zA-Z0-9]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('');
+  }
+
+  _extractUrlPath(urlString) {
+    try {
+      const url = new URL(urlString);
+      return url.pathname === '/' ? '' : url.pathname;
+    } catch {
+      return '';
+    }
+  }
+
+  _extractHostVariables(collection) {
+    const hostVarNames = new Set();
+    function traverse(items) {
+      for (const item of items) {
+        if (item.item) traverse(item.item);
+        if (item.request?.url?.host) {
+          for (const h of item.request.url.host) {
+            const m = h.match(/^\{\{(.+)\}\}$/);
+            if (m) hostVarNames.add(m[1]);
+          }
+        }
+      }
+    }
+    traverse(collection.item || []);
+    const collectionVars = collection.variable || [];
+    return Array.from(hostVarNames)
+      .map(varName => {
+        const varDef = collectionVars.find(v => v.key === varName);
+        const originalUrl = varDef?.value || '';
+        const path = this._extractUrlPath(originalUrl);
+        return { varName, originalUrl, path };
+      })
+      .filter(hv => hv.originalUrl.includes('://'));
   }
 
   _mergeVariables(existing, newVars) {

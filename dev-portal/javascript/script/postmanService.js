@@ -29,6 +29,50 @@ function extractError(error) {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
+const toPascalCase = (str) => {
+  return str
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[^a-zA-Z0-9]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('');
+};
+
+const extractUrlPath = (urlString) => {
+  try {
+    const url = new URL(urlString);
+    return url.pathname === '/' ? '' : url.pathname;
+  } catch {
+    return '';
+  }
+};
+
+const extractHostVariables = (collection) => {
+  const hostVarNames = new Set();
+  function traverse(items) {
+    for (const item of items) {
+      if (item.item) traverse(item.item);
+      if (item.request?.url?.host) {
+        for (const h of item.request.url.host) {
+          const m = h.match(/^\{\{(.+)\}\}$/);
+          if (m) hostVarNames.add(m[1]);
+        }
+      }
+    }
+  }
+  traverse(collection.item || []);
+  const collectionVars = collection.variable || [];
+  return Array.from(hostVarNames)
+    .map(varName => {
+      const varDef = collectionVars.find(v => v.key === varName);
+      const originalUrl = varDef?.value || '';
+      const path = extractUrlPath(originalUrl);
+      return { varName, originalUrl, path };
+    })
+    .filter(hv => hv.originalUrl.includes('://'));
+};
+
 // ============================================================================
 // WORKSPACE MANAGEMENT
 // ============================================================================
@@ -726,6 +770,25 @@ export const deleteCollection = async (collectionId) => {
   }
 };
 
+/**
+ * Patch collection variables (partial update).
+ * @param {string} collectionUid
+ * @param {Array} variables
+ * @returns {Promise<{success: boolean, collection?: object, error?: string}>}
+ */
+export const patchCollectionVariables = async (collectionUid, variables) => {
+  try {
+    const response = await axios.patch(
+      `${POSTMAN_API_BASE}/collections/${collectionUid}`,
+      { collection: { variable: variables } },
+      { headers: headers() }
+    );
+    return { success: true, collection: response.data.collection };
+  } catch (error) {
+    return { success: false, error: extractError(error) };
+  }
+};
+
 // ============================================================================
 // ENVIRONMENT MANAGEMENT
 // ============================================================================
@@ -1037,7 +1100,12 @@ export const provisionWorkspace = async (options, onProgress) => {
       const forkResult = await forkCollection(collection.uid, collection.name, workspaceId);
       if (forkResult.success) {
         results.collections.success++;
-        results.collections.successData.push({ name: forkResult.collectionName, uid: forkResult.uid });
+        const collDetails = await getCollectionDetails(forkResult.uid);
+        let hostVariables = [];
+        if (collDetails) {
+          hostVariables = extractHostVariables(collDetails);
+        }
+        results.collections.successData.push({ name: forkResult.collectionName, uid: forkResult.uid, hostVariables, collectionDetails: collDetails });
         collectionMap.set(collection.uid, forkResult.uid);
       } else {
         results.collections.failed.push({ name: collection.name, error: forkResult.error });
@@ -1056,7 +1124,7 @@ export const provisionWorkspace = async (options, onProgress) => {
       const mockResult = await createMockServer(mockName, collection.uid, workspaceId, null);
       if (mockResult.success) {
         results.mocks.success++;
-        results.mocks.urls.push({ collectionName: collection.name, mockName: mockResult.mockName, mockUrl: mockResult.mockUrl });
+        results.mocks.urls.push({ collectionName: collection.name, mockName: mockResult.mockName, mockUrl: mockResult.mockUrl, targetUid: collection.uid, hostVariables: collection.hostVariables });
       } else {
         results.mocks.failed.push({ name: mockName, error: mockResult.error });
         results.errors.push(`Failed to create mock ${mockName}: ${mockResult.error}`);
@@ -1089,10 +1157,29 @@ export const provisionWorkspace = async (options, onProgress) => {
 
     // Step 5: Update/Create Mock Env
     onProgress?.({ phase: "mockEnv", message: "Updating Mock Environment...", progress: 75 });
+    const mockEnvVarMap = new Map();
     if (results.mocks.urls.length > 0) {
-      const mockVariables = results.mocks.urls.map((mock, index) => ({
-        key: `mock_url_${index + 1}`, value: mock.mockUrl, type: "default", enabled: true, description: `Mock server URL for ${mock.collectionName}`,
-      }));
+      const toCamelCase = (name) => {
+        return name.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/)
+          .map((word, i) => i === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join('');
+      };
+
+      const mockVariables = [];
+      for (const mock of results.mocks.urls) {
+        const hostVars = mock.hostVariables || [];
+        if (hostVars.length === 0) {
+          const varName = toCamelCase(mock.collectionName) + 'BaseUrl';
+          mockVariables.push({ key: varName, value: mock.mockUrl, type: 'default', enabled: true });
+        } else {
+          for (const hv of hostVars) {
+            const envVarName = toCamelCase(mock.collectionName) + toPascalCase(hv.varName);
+            mockVariables.push({ key: envVarName, value: mock.mockUrl + hv.path, type: 'default', enabled: true });
+            mockEnvVarMap.set(`${mock.targetUid}:${hv.varName}`, envVarName);
+          }
+        }
+      }
+
       let mockEnv = null;
       for (const [, envData] of envMap) {
         if (MOCK_ENV_NAMES.some((name) => envData.name.toLowerCase() === name.toLowerCase())) { mockEnv = envData; break; }
@@ -1107,6 +1194,26 @@ export const provisionWorkspace = async (options, onProgress) => {
         const createResult = await createEnvironmentInPostman("Mock Env", mockVariables, workspaceId);
         if (createResult.success) { results.mockEnv = { success: true, action: "created" }; }
         else { results.errors.push(`Failed to create Mock Env: ${createResult.error}`); }
+      }
+    }
+
+    // Step 5b: Update collection variables to reference mock env
+    if (mockEnvVarMap.size > 0) {
+      onProgress?.({ phase: "collectionVars", message: "Updating collection variables...", progress: 78 });
+      for (const coll of results.collections.successData) {
+        if (!coll.hostVariables || coll.hostVariables.length === 0) continue;
+        if (!coll.collectionDetails) continue;
+        const existingVars = coll.collectionDetails.variable || [];
+        const updatedVars = existingVars.map(v => {
+          const hv = coll.hostVariables.find(h => h.varName === v.key);
+          if (hv) {
+            const envName = mockEnvVarMap.get(`${coll.uid}:${hv.varName}`);
+            if (envName) return { ...v, value: `{{${envName}}}` };
+          }
+          return v;
+        });
+        await patchCollectionVariables(coll.uid, updatedVars);
+        await delay(300);
       }
     }
 
@@ -1357,7 +1464,12 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
         const forkResult = await forkCollection(collection.uid, collection.name, workspaceId);
         if (forkResult.success) {
           results.collections.success++;
-          results.collections.successData.push({ name: forkResult.collectionName, uid: forkResult.uid });
+          const collDetails = await getCollectionDetails(forkResult.uid);
+          let hostVariables = [];
+          if (collDetails) {
+            hostVariables = extractHostVariables(collDetails);
+          }
+          results.collections.successData.push({ name: forkResult.collectionName, uid: forkResult.uid, hostVariables, collectionDetails: collDetails });
         } else {
           results.collections.failed.push({ name: collection.name, error: forkResult.error });
           results.errors.push(`Failed to fork ${collection.name}: ${forkResult.error}`);
@@ -1373,7 +1485,7 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
           const mockName = `${coll.name} Mock`;
           onProgress?.({ phase: "mocks", message: `Creating: ${mockName}`, current: i + 1, total: results.collections.successData.length, progress: 40 + (i / results.collections.successData.length) * 15 });
           const mockResult = await createMockServer(mockName, coll.uid, workspaceId, null);
-          if (mockResult.success) { results.mocks.success++; results.mocks.urls.push({ collectionName: coll.name, mockName: mockResult.mockName, mockUrl: mockResult.mockUrl }); }
+          if (mockResult.success) { results.mocks.success++; results.mocks.urls.push({ collectionName: coll.name, mockName: mockResult.mockName, mockUrl: mockResult.mockUrl, targetUid: coll.uid, hostVariables: coll.hostVariables }); }
           else { results.mocks.failed.push({ name: mockName, error: mockResult.error }); results.errors.push(`Failed to create mock ${mockName}: ${mockResult.error}`); }
           await delay(300);
         }
@@ -1398,9 +1510,30 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
         await delay(300);
       }
 
+      const customMockEnvVarMap = new Map();
       if (createMockEnv && results.mocks.urls.length > 0) {
         onProgress?.({ phase: "mockEnv", message: "Updating Mock Environment...", progress: 75 });
-        const mockVariables = results.mocks.urls.map((mock, idx) => ({ key: `mock_url_${idx + 1}`, value: mock.mockUrl, type: "default", enabled: true, description: `Mock server URL for ${mock.collectionName}` }));
+        const toCamelCase = (name) => {
+          return name.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/)
+            .map((word, i) => i === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join('');
+        };
+
+        const mockVariables = [];
+        for (const mock of results.mocks.urls) {
+          const hostVars = mock.hostVariables || [];
+          if (hostVars.length === 0) {
+            const varName = toCamelCase(mock.collectionName) + 'BaseUrl';
+            mockVariables.push({ key: varName, value: mock.mockUrl, type: 'default', enabled: true });
+          } else {
+            for (const hv of hostVars) {
+              const envVarName = toCamelCase(mock.collectionName) + toPascalCase(hv.varName);
+              mockVariables.push({ key: envVarName, value: mock.mockUrl + hv.path, type: 'default', enabled: true });
+              customMockEnvVarMap.set(`${mock.targetUid}:${hv.varName}`, envVarName);
+            }
+          }
+        }
+
         let mockEnv = null;
         for (const [, envData] of envMap) { if (MOCK_ENV_NAMES.some((n) => envData.name.toLowerCase() === n.toLowerCase())) { mockEnv = envData; break; } }
         if (mockEnv) {
@@ -1410,6 +1543,25 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
         } else {
           const cr = await createEnvironmentInPostman("Mock Env", mockVariables, workspaceId);
           if (cr.success) results.mockEnv = { success: true, action: "created" }; else results.errors.push(`Failed to create Mock Env: ${cr.error}`);
+        }
+      }
+
+      if (customMockEnvVarMap.size > 0) {
+        onProgress?.({ phase: "collectionVars", message: "Updating collection variables...", progress: 78 });
+        for (const coll of results.collections.successData) {
+          if (!coll.hostVariables || coll.hostVariables.length === 0) continue;
+          if (!coll.collectionDetails) continue;
+          const existingVars = coll.collectionDetails.variable || [];
+          const updatedVars = existingVars.map(v => {
+            const hv = coll.hostVariables.find(h => h.varName === v.key);
+            if (hv) {
+              const envName = customMockEnvVarMap.get(`${coll.uid}:${hv.varName}`);
+              if (envName) return { ...v, value: `{{${envName}}}` };
+            }
+            return v;
+          });
+          await patchCollectionVariables(coll.uid, updatedVars);
+          await delay(300);
         }
       }
     }

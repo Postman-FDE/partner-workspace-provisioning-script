@@ -160,6 +160,15 @@ export interface ForkResult {
 }
 
 /**
+ * Host variable extracted from a collection's request URLs
+ */
+export interface HostVariableInfo {
+  varName: string;
+  originalUrl: string;
+  path: string;
+}
+
+/**
  * Collection mapping (source to target)
  */
 export interface CollectionMapping {
@@ -167,4 +176,6 @@ export interface CollectionMapping {
   targetUid: string;
   name: string;
   mockUrl?: string;
+  hostVariables?: HostVariableInfo[];
+  collectionDetails?: any;
 }

@@ -142,6 +142,12 @@ export interface ForkCollectionResult {
   error?: string;
 }
 
+export interface HostVariableInfo {
+  varName: string;
+  originalUrl: string;
+  path: string;
+}
+
 export interface CreateCollectionResult {
   success: boolean;
   collectionName: string;
@@ -348,6 +354,66 @@ function extractError(error: unknown): string {
   }
   return error instanceof Error ? error.message : "Unknown error";
 }
+
+// ============================================================================
+// HOST VARIABLE UTILITIES
+// ============================================================================
+
+export const toPascalCase = (str: string): string => {
+  return str
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[^a-zA-Z0-9]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('');
+};
+
+export const toCamelCase = (name: string): string => {
+  return name
+    .replace(/[^a-zA-Z0-9\s]/g, '')
+    .split(/\s+/)
+    .map((word, index) =>
+      index === 0
+        ? word.toLowerCase()
+        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    )
+    .join('');
+};
+
+export const extractUrlPath = (urlString: string): string => {
+  try {
+    const url = new URL(urlString);
+    return url.pathname === '/' ? '' : url.pathname;
+  } catch {
+    return '';
+  }
+};
+
+export const extractHostVariables = (collection: any): HostVariableInfo[] => {
+  const hostVarNames = new Set<string>();
+  function traverse(items: any[]) {
+    for (const item of items) {
+      if (item.item) traverse(item.item);
+      if (item.request?.url?.host) {
+        for (const h of item.request.url.host) {
+          const m = h.match(/^\{\{(.+)\}\}$/);
+          if (m) hostVarNames.add(m[1]);
+        }
+      }
+    }
+  }
+  traverse(collection.item || []);
+  const collectionVars: any[] = collection.variable || [];
+  return Array.from(hostVarNames)
+    .map(varName => {
+      const varDef = collectionVars.find((v: any) => v.key === varName);
+      const originalUrl = varDef?.value || '';
+      const path = extractUrlPath(originalUrl);
+      return { varName, originalUrl, path };
+    })
+    .filter(hv => hv.originalUrl.includes('://'));
+};
 
 // ============================================================================
 // WORKSPACE MANAGEMENT
@@ -1091,6 +1157,25 @@ export const getCollectionDetails = async (
 };
 
 /**
+ * Patch collection variables via partial update.
+ */
+export const patchCollectionVariables = async (
+  collectionUid: string,
+  variables: Array<{ key: string; value: string; [key: string]: any }>
+): Promise<{ success: boolean; collection?: any; error?: string }> => {
+  try {
+    const response = await axios.patch(
+      `${POSTMAN_API_BASE}/collections/${collectionUid}`,
+      { collection: { variable: variables } },
+      { headers: headers() }
+    );
+    return { success: true, collection: response.data.collection };
+  } catch (error) {
+    return { success: false, error: extractError(error) };
+  }
+};
+
+/**
  * Create a collection in Postman.
  */
 export const createCollectionInPostman = async (
@@ -1610,11 +1695,12 @@ export const provisionWorkspace = async (
       results.workspaceCreated = true;
     }
 
-    // Step 2: Copy Collections
+    // Step 2: Copy Collections (+ extract host variables)
     onProgress?.({ phase: "collections", message: "Copying collections...", progress: 20 });
     const sourceCollections = await getAllCollections(sourceWorkspaceId);
     results.collections.total = sourceCollections.length;
     const collectionMap = new Map<string, string>();
+    const collectionHostVars = new Map<string, { hostVariables: HostVariableInfo[]; collectionDetails: any }>();
 
     for (let i = 0; i < sourceCollections.length; i++) {
       const collection = sourceCollections[i];
@@ -1628,11 +1714,22 @@ export const provisionWorkspace = async (
       const forkResult = await forkCollection(collection.uid, collection.name, workspaceId!);
       if (forkResult.success) {
         results.collections.success++;
-        results.collections.successData.push({
+        const entry: { name: string; uid?: string; hostVariables?: HostVariableInfo[] } = {
           name: forkResult.collectionName,
           uid: forkResult.uid,
-        });
-        if (forkResult.uid) collectionMap.set(collection.uid, forkResult.uid);
+        };
+
+        if (forkResult.uid) {
+          collectionMap.set(collection.uid, forkResult.uid);
+          const collDetails = await getCollectionDetails(forkResult.uid);
+          if (collDetails) {
+            const hostVars = extractHostVariables(collDetails);
+            entry.hostVariables = hostVars;
+            collectionHostVars.set(forkResult.uid, { hostVariables: hostVars, collectionDetails: collDetails });
+          }
+        }
+
+        results.collections.successData.push(entry);
       } else {
         results.collections.failed.push({ name: collection.name, error: forkResult.error });
         results.errors.push(`Failed to fork ${collection.name}: ${forkResult.error}`);
@@ -1661,11 +1758,14 @@ export const provisionWorkspace = async (
       );
       if (mockResult.success) {
         results.mocks.success++;
-        results.mocks.urls.push({
+        const mockEntry: any = {
           collectionName: collection.name,
           mockName: mockResult.mockName,
           mockUrl: mockResult.mockUrl,
-        });
+        };
+        const hvData = collectionHostVars.get(collection.uid!);
+        if (hvData) mockEntry.hostVariables = hvData.hostVariables;
+        results.mocks.urls.push(mockEntry);
       } else {
         results.mocks.failed.push({ name: mockName, error: mockResult.error });
         results.errors.push(`Failed to create mock ${mockName}: ${mockResult.error}`);
@@ -1722,16 +1822,40 @@ export const provisionWorkspace = async (
       await delay(300);
     }
 
-    // Step 5: Update/Create Mock Env
+    // Step 5: Update/Create Mock Env (per-host-variable naming with paths)
     onProgress?.({ phase: "mockEnv", message: "Updating Mock Environment...", progress: 75 });
+    const mockEnvVarMap = new Map<string, string>();
     if (results.mocks.urls.length > 0) {
-      const mockVariables: EnvironmentVariable[] = results.mocks.urls.map((mock, index) => ({
-        key: `mock_url_${index + 1}`,
-        value: mock.mockUrl ?? "",
-        type: "default",
-        enabled: true,
-        description: `Mock server URL for ${mock.collectionName}`,
-      }));
+      const mockVariables: EnvironmentVariable[] = [];
+      for (const mockEntry of results.mocks.urls as any[]) {
+        const hostVars: HostVariableInfo[] = mockEntry.hostVariables || [];
+        if (hostVars.length === 0) {
+          const varName = toCamelCase(mockEntry.collectionName) + 'BaseUrl';
+          mockVariables.push({
+            key: varName,
+            value: mockEntry.mockUrl ?? "",
+            type: "default",
+            enabled: true,
+          });
+        } else {
+          for (const hv of hostVars) {
+            const collectionPart = toCamelCase(mockEntry.collectionName);
+            const varPart = toPascalCase(hv.varName);
+            const envVarName = collectionPart + varPart;
+            mockVariables.push({
+              key: envVarName,
+              value: (mockEntry.mockUrl ?? "") + hv.path,
+              type: "default",
+              enabled: true,
+            });
+            const collUid = results.collections.successData.find(
+              (c) => c.name === mockEntry.collectionName
+            )?.uid;
+            if (collUid) mockEnvVarMap.set(`${collUid}:${hv.varName}`, envVarName);
+          }
+        }
+      }
+
       let mockEnv: { targetUid: string; name: string } | null = null;
       for (const envData of Array.from(envMap.values())) {
         if (
@@ -1767,6 +1891,28 @@ export const provisionWorkspace = async (
         } else {
           results.errors.push(`Failed to create Mock Env: ${createResult.error}`);
         }
+      }
+    }
+
+    // Step 5b: Update collection variables to reference mock env variable names
+    if (mockEnvVarMap.size > 0) {
+      onProgress?.({ phase: "collectionVars", message: "Updating collection variables...", progress: 77 });
+      for (const [collUid, hvData] of collectionHostVars) {
+        if (!hvData.hostVariables.length || !hvData.collectionDetails) continue;
+        const existingVars: any[] = hvData.collectionDetails.variable || [];
+        const updatedVars = existingVars.map((v: any) => {
+          const hv = hvData.hostVariables.find((h) => h.varName === v.key);
+          if (hv) {
+            const mockEnvVarName = mockEnvVarMap.get(`${collUid}:${hv.varName}`);
+            if (mockEnvVarName) return { ...v, value: `{{${mockEnvVarName}}}` };
+          }
+          return v;
+        });
+        const patchResult = await patchCollectionVariables(collUid, updatedVars);
+        if (!patchResult.success) {
+          results.errors.push(`Failed to update variables for collection ${collUid}: ${patchResult.error}`);
+        }
+        await delay(300);
       }
     }
 
@@ -2114,6 +2260,8 @@ export const provisionCustomWorkspace = async (
       results.workspaceCreated = true;
     }
 
+    const customCollectionHostVars = new Map<string, { hostVariables: HostVariableInfo[]; collectionDetails: any }>();
+
     if (copyCollections) {
       onProgress?.({ phase: "collections", message: "Copying collections...", progress: 20 });
       let sourceCollections = await getAllCollections(sourceWorkspaceId);
@@ -2136,10 +2284,21 @@ export const provisionCustomWorkspace = async (
         const forkResult = await forkCollection(collection.uid, collection.name, workspaceId!);
         if (forkResult.success) {
           results.collections.success++;
-          results.collections.successData.push({
+          const entry: { name: string; uid?: string; hostVariables?: HostVariableInfo[] } = {
             name: forkResult.collectionName,
             uid: forkResult.uid,
-          });
+          };
+
+          if (forkResult.uid) {
+            const collDetails = await getCollectionDetails(forkResult.uid);
+            if (collDetails) {
+              const hostVars = extractHostVariables(collDetails);
+              entry.hostVariables = hostVars;
+              customCollectionHostVars.set(forkResult.uid, { hostVariables: hostVars, collectionDetails: collDetails });
+            }
+          }
+
+          results.collections.successData.push(entry);
         } else {
           results.collections.failed.push({ name: collection.name, error: forkResult.error });
           results.errors.push(`Failed to fork ${collection.name}: ${forkResult.error}`);
@@ -2168,11 +2327,14 @@ export const provisionCustomWorkspace = async (
           );
           if (mockResult.success) {
             results.mocks.success++;
-            results.mocks.urls.push({
+            const mockEntry: any = {
               collectionName: coll.name,
               mockName: mockResult.mockName,
               mockUrl: mockResult.mockUrl,
-            });
+            };
+            const hvData = customCollectionHostVars.get(coll.uid!);
+            if (hvData) mockEntry.hostVariables = hvData.hostVariables;
+            results.mocks.urls.push(mockEntry);
           } else {
             results.mocks.failed.push({ name: mockName, error: mockResult.error });
             results.errors.push(`Failed to create mock ${mockName}: ${mockResult.error}`);
@@ -2232,13 +2394,37 @@ export const provisionCustomWorkspace = async (
 
       if (createMockEnv && results.mocks.urls.length > 0) {
         onProgress?.({ phase: "mockEnv", message: "Updating Mock Environment...", progress: 75 });
-        const mockVariables: EnvironmentVariable[] = results.mocks.urls.map((mock, idx) => ({
-          key: `mock_url_${idx + 1}`,
-          value: mock.mockUrl ?? "",
-          type: "default",
-          enabled: true,
-          description: `Mock server URL for ${mock.collectionName}`,
-        }));
+        const customMockEnvVarMap = new Map<string, string>();
+        const mockVariables: EnvironmentVariable[] = [];
+        for (const mockEntry of results.mocks.urls as any[]) {
+          const hostVars: HostVariableInfo[] = mockEntry.hostVariables || [];
+          if (hostVars.length === 0) {
+            const varName = toCamelCase(mockEntry.collectionName) + 'BaseUrl';
+            mockVariables.push({
+              key: varName,
+              value: mockEntry.mockUrl ?? "",
+              type: "default",
+              enabled: true,
+            });
+          } else {
+            for (const hv of hostVars) {
+              const collectionPart = toCamelCase(mockEntry.collectionName);
+              const varPart = toPascalCase(hv.varName);
+              const envVarName = collectionPart + varPart;
+              mockVariables.push({
+                key: envVarName,
+                value: (mockEntry.mockUrl ?? "") + hv.path,
+                type: "default",
+                enabled: true,
+              });
+              const collUid = results.collections.successData.find(
+                (c) => c.name === mockEntry.collectionName
+              )?.uid;
+              if (collUid) customMockEnvVarMap.set(`${collUid}:${hv.varName}`, envVarName);
+            }
+          }
+        }
+
         let mockEnv: { targetUid: string; name: string } | null = null;
         for (const envData of Array.from(envMap.values())) {
           if (
@@ -2271,6 +2457,28 @@ export const provisionCustomWorkspace = async (
             results.mockEnv = { success: true, action: "created" };
           } else {
             results.errors.push(`Failed to create Mock Env: ${cr.error}`);
+          }
+        }
+
+        // Update collection variables to reference mock env variable names
+        if (customMockEnvVarMap.size > 0) {
+          onProgress?.({ phase: "collectionVars", message: "Updating collection variables...", progress: 77 });
+          for (const [collUid, hvData] of customCollectionHostVars) {
+            if (!hvData.hostVariables.length || !hvData.collectionDetails) continue;
+            const existingVars: any[] = hvData.collectionDetails.variable || [];
+            const updatedVars = existingVars.map((v: any) => {
+              const hv = hvData.hostVariables.find((h) => h.varName === v.key);
+              if (hv) {
+                const mockEnvVarName = customMockEnvVarMap.get(`${collUid}:${hv.varName}`);
+                if (mockEnvVarName) return { ...v, value: `{{${mockEnvVarName}}}` };
+              }
+              return v;
+            });
+            const patchResult = await patchCollectionVariables(collUid, updatedVars);
+            if (!patchResult.success) {
+              results.errors.push(`Failed to update variables for collection ${collUid}: ${patchResult.error}`);
+            }
+            await delay(300);
           }
         }
       }

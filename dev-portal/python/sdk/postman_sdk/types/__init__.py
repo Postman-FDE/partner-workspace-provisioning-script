@@ -27,6 +27,7 @@ from postman_sdk.types.collection import (
     CollectionDetails,
     ForkResult,
     CollectionMapping,
+    HostVariableInfo,
 )
 from postman_sdk.types.environment import (
     Environment,
@@ -89,6 +90,7 @@ __all__ = [
     "CollectionDetails",
     "ForkResult",
     "CollectionMapping",
+    "HostVariableInfo",
     # Environment
     "Environment",
     "EnvironmentDetails",

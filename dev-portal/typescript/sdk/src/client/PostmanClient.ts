@@ -259,6 +259,24 @@ export class PostmanClient {
     }
   }
 
+  /**
+   * Update a collection's variables via partial update
+   * PATCH /collections/{collectionId}
+   */
+  async patchCollectionVariables(
+    collectionUid: string,
+    variables: Array<{ key: string; value: string; [k: string]: unknown }>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      await this.http.patch(`/collections/${collectionUid}`, {
+        collection: { variable: variables },
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
   // =========================================================================
   // ENVIRONMENTS
   // =========================================================================

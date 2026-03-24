@@ -204,6 +204,19 @@ class PostmanClient:
         except Exception:
             return False
 
+    async def patch_collection_variables(
+        self, collection_uid: str, variables: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Update a collection's variables via PATCH /collections/{uid}"""
+        try:
+            response = await self._http.patch(
+                f"/collections/{collection_uid}",
+                json={"collection": {"variable": variables}},
+            )
+            return {"success": True, "collection": response.get("collection")}
+        except Exception as e:
+            return {"success": False, "error": get_error_message(e)}
+
     # =========================================================================
     # ENVIRONMENTS
     # =========================================================================

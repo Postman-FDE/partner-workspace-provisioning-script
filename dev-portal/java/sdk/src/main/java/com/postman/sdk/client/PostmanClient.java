@@ -160,6 +160,35 @@ public class PostmanClient {
             .onErrorResume(e -> Mono.just(false));
     }
 
+    /**
+     * Get full collection details (includes items, variables, etc.)
+     * GET /collections/{collectionId}
+     */
+    @SuppressWarnings("unchecked")
+    public Mono<Map<String, Object>> getCollectionDetails(String collectionUid) {
+        return webClient.get()
+            .uri("/collections/{uid}", collectionUid)
+            .retrieve()
+            .bodyToMono(Map.class)
+            .map(response -> (Map<String, Object>) response.getOrDefault("collection", Map.of()))
+            .onErrorResume(e -> Mono.empty());
+    }
+
+    /**
+     * Update a collection's variables via PATCH
+     * PATCH /collections/{collectionId}
+     */
+    @SuppressWarnings("unchecked")
+    public Mono<ApiResponse<Void>> patchCollectionVariables(String collectionUid, List<Map<String, Object>> variables) {
+        return webClient.patch()
+            .uri("/collections/{uid}", collectionUid)
+            .bodyValue(Map.of("collection", Map.of("variable", variables)))
+            .retrieve()
+            .toBodilessEntity()
+            .map(response -> ApiResponse.<Void>success(null))
+            .onErrorResume(e -> Mono.just(ApiResponse.failure(getErrorMessage(e))));
+    }
+
     // =========================================================================
     // ENVIRONMENTS
     // =========================================================================
@@ -216,6 +245,36 @@ public class PostmanClient {
 
         return webClient.post()
             .uri("/environments?workspace={workspaceId}", workspaceId)
+            .bodyValue(body)
+            .retrieve()
+            .bodyToMono(Map.class)
+            .map(response -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> environment = (Map<String, Object>) response.get("environment");
+                return ApiResponse.success(mapToEnvironment(environment));
+            })
+            .onErrorResume(e -> Mono.just(ApiResponse.failure(getErrorMessage(e))));
+    }
+
+    /**
+     * Update an environment (full replace)
+     * PUT /environments/{environmentId}
+     */
+    public Mono<ApiResponse<Environment>> updateEnvironment(String environmentUid, String name, List<Environment.EnvironmentVariable> values) {
+        Map<String, Object> body = Map.of(
+            "environment", Map.of(
+                "name", name,
+                "values", values.stream().map(v -> Map.of(
+                    "key", v.key(),
+                    "value", v.value(),
+                    "type", v.type(),
+                    "enabled", v.enabled()
+                )).toList()
+            )
+        );
+
+        return webClient.put()
+            .uri("/environments/{uid}", environmentUid)
             .bodyValue(body)
             .retrieve()
             .bodyToMono(Map.class)

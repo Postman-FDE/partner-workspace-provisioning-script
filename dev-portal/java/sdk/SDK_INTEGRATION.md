@@ -656,7 +656,8 @@ public class WorkspaceController {
         return provisioner.provision(
             request.getSourceWorkspaceId(),
             request.getWorkspaceName()
-        );
+        ).doOnNext(result -> log.info("Collection variables updated: {}", 
+            result.get("collectionVariables")));
     }
 
     @PostMapping("/reset/{workspaceId}")

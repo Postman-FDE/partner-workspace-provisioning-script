@@ -434,6 +434,7 @@ const result = await provisionWorkspace({
 });
 
 console.log('Invitation links:', result.invitations.links);
+console.log('Collection variables updated:', result.collectionVariables.success);
 
 // --- Class-based usage ---
 

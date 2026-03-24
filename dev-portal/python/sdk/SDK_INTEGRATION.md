@@ -460,6 +460,7 @@ async def main():
             source_workspace_id="template-workspace-id",
             workspace_name="My New Workspace",
         )
+        print(f"Collection variables updated: {provision_result.collection_variables.success}")
 
         # Reset a workspace
         resetter = ResetService(client)

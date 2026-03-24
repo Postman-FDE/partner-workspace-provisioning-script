@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.*;
 import java.util.function.Consumer;
@@ -43,6 +44,7 @@ public class ProvisioningService {
             .flatMap(v -> createMocks(ctx))
             .flatMap(v -> copyEnvironments(ctx))
             .flatMap(v -> updateMockEnvironment(ctx))
+            .flatMap(v -> updateCollectionVariables(ctx))
             .flatMap(v -> copySpecs(ctx))
             .flatMap(v -> addAdmins(ctx))
             .flatMap(v -> invitePartners(ctx))
@@ -77,15 +79,27 @@ public class ProvisioningService {
                 return Flux.fromIterable(collections)
                     .delayElements(Duration.ofMillis(500))
                     .flatMap(collection -> client.forkCollection(collection.uid(), collection.name(), ctx.targetWorkspaceId)
-                        .map(result -> {
+                        .flatMap(result -> {
                             if (result.success()) {
-                                CollectionMapping mapping = new CollectionMapping(collection.uid(), result.data().uid(), collection.name());
+                                String targetUid = result.data().uid();
+                                CollectionMapping mapping = new CollectionMapping(collection.uid(), targetUid, collection.name());
                                 ctx.collectionMappings.put(collection.uid(), mapping);
                                 ctx.result.collections.success++;
+
+                                return client.getCollectionDetails(targetUid)
+                                    .map(details -> {
+                                        if (details != null) {
+                                            ctx.collectionDetails.put(targetUid, details);
+                                            List<Map<String, String>> hostVars = extractHostVariables(details);
+                                            ctx.collectionHostVars.put(targetUid, hostVars);
+                                        }
+                                        return result;
+                                    })
+                                    .onErrorResume(e -> Mono.just(result));
                             } else {
                                 ctx.result.collections.failed.add(Map.of("name", collection.name(), "error", result.error()));
+                                return Mono.just(result);
                             }
-                            return result;
                         }))
                     .then();
             });
@@ -155,12 +169,14 @@ public class ProvisioningService {
     private Mono<Void> updateMockEnvironment(ProvisioningContext ctx) {
         ctx.emitProgress("mockEnv", "Updating mock environment...");
         
-        List<Environment.EnvironmentVariable> mockUrlVars = generateMockUrlVariables(ctx);
+        MockUrlGenerationResult genResult = generateMockUrlVariables(ctx);
+        List<Environment.EnvironmentVariable> mockUrlVars = genResult.variables();
+        ctx.mockEnvVarMap = genResult.mockEnvVarMap();
+
         if (mockUrlVars.isEmpty()) {
             return Mono.empty();
         }
 
-        // Find existing Mock Env
         Optional<EnvironmentMapping> mockEnvMapping = ctx.environmentMappings.values().stream()
             .filter(m -> List.of("Mock Env", "Mock Environment", "Test Env").stream()
                 .anyMatch(name -> m.name().equalsIgnoreCase(name)))
@@ -171,42 +187,134 @@ public class ProvisioningService {
                 .flatMap(details -> {
                     if (details == null) return Mono.empty();
                     List<Environment.EnvironmentVariable> merged = mergeVariables(details.values(), mockUrlVars);
-                    // For simplicity, we'd need an updateEnvironment method - skipping for now
-                    return Mono.empty();
+                    return client.updateEnvironment(
+                        mockEnvMapping.get().targetUid(),
+                        mockEnvMapping.get().name(),
+                        merged
+                    ).then();
                 });
         }
 
         return client.createEnvironment("Mock Env", mockUrlVars, ctx.targetWorkspaceId).then();
     }
 
-    private List<Environment.EnvironmentVariable> generateMockUrlVariables(ProvisioningContext ctx) {
+    private record MockUrlGenerationResult(
+        List<Environment.EnvironmentVariable> variables,
+        Map<String, String> mockEnvVarMap
+    ) {}
+
+    private MockUrlGenerationResult generateMockUrlVariables(ProvisioningContext ctx) {
         List<Environment.EnvironmentVariable> variables = new ArrayList<>();
+        Map<String, String> mockEnvVarMap = new HashMap<>();
         
         for (MockMapping mock : ctx.mockMappings.values()) {
-            String varName = toVariableName(mock.collectionName()) + "_mockUrl";
-            variables.add(new Environment.EnvironmentVariable(varName, mock.mockUrl(), "default", true));
+            String collectionUid = mock.collectionUid();
+            String collectionCamel = toCamelCase(mock.collectionName());
+            List<Map<String, String>> hostVars = ctx.collectionHostVars.getOrDefault(collectionUid, List.of());
+            
+            if (hostVars.isEmpty()) {
+                String varName = collectionCamel + "BaseUrl";
+                variables.add(new Environment.EnvironmentVariable(varName, mock.mockUrl(), "default", true));
+            } else {
+                for (Map<String, String> hostVar : hostVars) {
+                    String originalVarName = hostVar.get("varName");
+                    String path = hostVar.get("path");
+                    String envVarName = collectionCamel + toPascalCase(originalVarName);
+                    String mockUrlWithPath = mock.mockUrl() + (path != null ? path : "");
+
+                    variables.add(new Environment.EnvironmentVariable(envVarName, mockUrlWithPath, "default", true));
+                    mockEnvVarMap.put(collectionUid + ":" + originalVarName, envVarName);
+                }
+            }
         }
 
-        if (!variables.isEmpty()) {
-            variables.add(0, new Environment.EnvironmentVariable("baseUrl", variables.get(0).value(), "default", true));
-        }
-
-        return variables;
+        return new MockUrlGenerationResult(variables, mockEnvVarMap);
     }
 
-    private String toVariableName(String name) {
+    private String toCamelCase(String name) {
         String clean = name.replaceAll("[^a-zA-Z0-9\\s]", "");
-        String[] words = clean.split("\\s+");
+        String[] words = clean.trim().split("\\s+");
         StringBuilder result = new StringBuilder();
         for (int i = 0; i < words.length; i++) {
             if (i == 0) {
                 result.append(words[i].toLowerCase());
             } else {
-                result.append(words[i].substring(0, 1).toUpperCase())
+                result.append(Character.toUpperCase(words[i].charAt(0)))
                       .append(words[i].substring(1).toLowerCase());
             }
         }
         return result.toString();
+    }
+
+    private String toPascalCase(String str) {
+        String spaced = str.replaceAll("([a-z])([A-Z])", "$1 $2")
+                           .replaceAll("[^a-zA-Z0-9]", " ");
+        StringBuilder sb = new StringBuilder();
+        for (String word : spaced.trim().split("\\s+")) {
+            if (!word.isEmpty()) {
+                sb.append(Character.toUpperCase(word.charAt(0)))
+                  .append(word.substring(1).toLowerCase());
+            }
+        }
+        return sb.toString();
+    }
+
+    private String extractUrlPath(String urlString) {
+        try {
+            URI uri = new URI(urlString);
+            String path = uri.getPath();
+            return (path == null || path.equals("/")) ? "" : path;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, String>> extractHostVariables(Map<String, Object> collection) {
+        Set<String> hostVarNames = new HashSet<>();
+        List<Map<String, Object>> items = (List<Map<String, Object>>) collection.getOrDefault("item", List.of());
+        traverseItems(items, hostVarNames);
+
+        List<Map<String, Object>> collectionVars = (List<Map<String, Object>>) collection.getOrDefault("variable", List.of());
+        List<Map<String, String>> result = new ArrayList<>();
+        for (String varName : hostVarNames) {
+            Map<String, Object> varDef = collectionVars.stream()
+                .filter(v -> varName.equals(v.get("key")))
+                .findFirst().orElse(null);
+            String originalUrl = varDef != null ? String.valueOf(varDef.getOrDefault("value", "")) : "";
+            if (originalUrl.contains("://")) {
+                String path = extractUrlPath(originalUrl);
+                result.add(Map.of("varName", varName, "originalUrl", originalUrl, "path", path));
+            }
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void traverseItems(List<Map<String, Object>> items, Set<String> hostVarNames) {
+        Pattern pattern = Pattern.compile("^\\{\\{(.+)\\}\\}$");
+        for (Map<String, Object> item : items) {
+            if (item.containsKey("item") && item.get("item") instanceof List) {
+                traverseItems((List<Map<String, Object>>) item.get("item"), hostVarNames);
+            }
+            Object requestObj = item.get("request");
+            if (requestObj instanceof Map) {
+                Map<String, Object> request = (Map<String, Object>) requestObj;
+                Object urlObj = request.get("url");
+                if (urlObj instanceof Map) {
+                    Map<String, Object> url = (Map<String, Object>) urlObj;
+                    Object hostsObj = url.get("host");
+                    if (hostsObj instanceof List) {
+                        for (Object h : (List<?>) hostsObj) {
+                            Matcher m = pattern.matcher(String.valueOf(h));
+                            if (m.matches()) {
+                                hostVarNames.add(m.group(1));
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private List<Environment.EnvironmentVariable> mergeVariables(List<Environment.EnvironmentVariable> existing, List<Environment.EnvironmentVariable> newVars) {
@@ -220,6 +328,53 @@ public class ProvisioningService {
             merged.put(v.key(), v);
         }
         return new ArrayList<>(merged.values());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Mono<Void> updateCollectionVariables(ProvisioningContext ctx) {
+        ctx.emitProgress("collectionVars", "Updating collection variables...");
+
+        if (ctx.mockEnvVarMap.isEmpty()) {
+            return Mono.empty();
+        }
+
+        return Flux.fromIterable(ctx.collectionMappings.values())
+            .delayElements(Duration.ofMillis(300))
+            .flatMap(mapping -> {
+                String targetUid = mapping.targetUid();
+                List<Map<String, String>> hostVars = ctx.collectionHostVars.getOrDefault(targetUid, List.of());
+                Map<String, Object> details = ctx.collectionDetails.getOrDefault(targetUid, Map.of());
+                if (hostVars.isEmpty() || details.isEmpty()) {
+                    return Mono.empty();
+                }
+
+                List<Map<String, Object>> existingVars = (List<Map<String, Object>>) details.getOrDefault("variable", List.of());
+                List<Map<String, Object>> updatedVars = new ArrayList<>();
+                for (Map<String, Object> v : existingVars) {
+                    String key = String.valueOf(v.getOrDefault("key", ""));
+                    Map<String, String> hv = hostVars.stream()
+                        .filter(h -> key.equals(h.get("varName")))
+                        .findFirst().orElse(null);
+                    if (hv != null) {
+                        String envName = ctx.mockEnvVarMap.get(targetUid + ":" + hv.get("varName"));
+                        if (envName != null) {
+                            Map<String, Object> updated = new HashMap<>(v);
+                            updated.put("value", "{{" + envName + "}}");
+                            updatedVars.add(updated);
+                            continue;
+                        }
+                    }
+                    updatedVars.add(v);
+                }
+
+                if (updatedVars.isEmpty()) {
+                    return Mono.empty();
+                }
+
+                return client.patchCollectionVariables(targetUid, updatedVars)
+                    .onErrorResume(e -> Mono.empty());
+            })
+            .then();
     }
 
     private Mono<Void> copySpecs(ProvisioningContext ctx) {
@@ -287,6 +442,9 @@ public class ProvisioningService {
         final Map<String, CollectionMapping> collectionMappings = new HashMap<>();
         final Map<String, MockMapping> mockMappings = new HashMap<>();
         final Map<String, EnvironmentMapping> environmentMappings = new HashMap<>();
+        final Map<String, List<Map<String, String>>> collectionHostVars = new HashMap<>();
+        final Map<String, Map<String, Object>> collectionDetails = new HashMap<>();
+        Map<String, String> mockEnvVarMap = new HashMap<>();
         String targetWorkspaceId;
 
         ProvisioningContext(ProvisioningConfig config) {

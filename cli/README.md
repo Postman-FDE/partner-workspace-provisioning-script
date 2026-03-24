@@ -26,6 +26,7 @@ Command-line tools for interactive Postman workspace provisioning and reset oper
 The CLI tools provide an interactive way to:
 
 - **Provision** new partner workspaces by copying collections, environments, mocks, and specs from a source workspace
+- **Map mock URLs** with path-aware variable naming and automatic collection variable updates
 - **Reset** existing workspaces by deleting all or selected resources
 - **Manage** team members and partner invitations
 
@@ -152,15 +153,16 @@ Proceed with provisioning? (y/n): y
 
 Starting provisioning...
 
-[1/9] Validating API key...                    ✓
-[2/9] Creating workspace...                    ✓
-[3/9] Copying collections...                   ✓ 3/3
-[4/9] Creating mock servers...                 ✓ 3/3
-[5/9] Copying environments...                  ✓ 2/2
-[6/9] Updating mock environment...             ✓
-[7/9] Copying API specs...                     ✓ 1/1
-[8/9] Adding workspace admins...               ✓ 2/2
-[9/9] Inviting partners...                     ✓ 2/2
+ [1/10] Validating API key...                    ✓
+ [2/10] Creating workspace...                    ✓
+ [3/10] Copying collections...                   ✓ 3/3
+ [4/10] Creating mock servers...                 ✓ 3/3
+ [5/10] Copying environments...                  ✓ 2/2
+ [6/10] Updating mock environment...             ✓
+ [7/10] Updating collection variables...         ✓ 3/3
+ [8/10] Copying API specs...                     ✓ 1/1
+ [9/10] Adding workspace admins...               ✓ 2/2
+[10/10] Inviting partners...                     ✓ 2/2
 
 ════════════════════════════════════════════════════════════
 Provisioning Complete!
@@ -180,9 +182,14 @@ Results Summary:
   Partners:     2/2 invited
 
 Mock Server URLs:
-  Authentication API: https://abc123.mock.pstmn.io
-  User Service:       https://def456.mock.pstmn.io
-  Payment Gateway:    https://ghi789.mock.pstmn.io
+  Authentication API: https://abc123.mock.pstmn.io/v1/auth
+  User Service:       https://def456.mock.pstmn.io/api/users
+  Payment Gateway:    https://ghi789.mock.pstmn.io/v2/payments
+
+Mock Environment Variables:
+  authenticationApiBaseUrl -> https://abc123.mock.pstmn.io/v1/auth
+  userServiceHostName     -> https://def456.mock.pstmn.io/api/users
+  paymentGatewayBaseUrl   -> https://ghi789.mock.pstmn.io/v2/payments
 
 Partner Invitation Links (Run in Postman):
   partner1@company.com:

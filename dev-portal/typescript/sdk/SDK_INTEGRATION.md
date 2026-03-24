@@ -470,6 +470,7 @@ const provisioner = new ProvisioningService({
   targetWorkspaceName: 'My New Workspace',
 });
 const result = await provisioner.provision();
+console.log('Collection variables updated:', result.collectionVariables.success);
 
 // Reset a workspace
 const resetter = new ResetService({

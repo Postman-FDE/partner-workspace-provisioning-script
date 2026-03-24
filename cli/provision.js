@@ -7,13 +7,14 @@
  * copies spec files, adds team members, and invites partners from a source workspace.
  * 
  * WORKFLOW ORDER:
- *   1. Copy collections from source to target workspace
+ *   1. Copy collections from source to target workspace (+ extract host variables)
  *   2. Create mock servers for each copied collection
  *   3. Copy placeholder environments from source workspace
- *   4. Update Mock Env / Test Env with new mock URLs (or create new Mock Env)
- *   5. Copy spec files from source to target workspace
- *   6. Add team members as workspace admins (optional)
- *   7. Invite partners to the workspace (optional) - returns invitation links
+ *   4. Update Mock Env / Test Env with new mock URLs (with full URL paths appended)
+ *   5. Update collection variables to reference mock env variable names
+ *   6. Copy spec files from source to target workspace
+ *   7. Add team members as workspace admins (optional)
+ *   8. Invite partners to the workspace (optional) - returns invitation links
  * 
  * Required Environment Variables:
  *   - POSTMAN_API_KEY: Your Postman API key
@@ -226,6 +227,66 @@ const logApiError = (operation, error, context = {}) => {
 // ============================================================================
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Convert a string to PascalCase, splitting on camelCase boundaries and non-alphanumeric chars.
+ * e.g. "baseUrl" -> "BaseUrl", "HostName" -> "HostName", "authToken_Hostname" -> "AuthTokenHostname"
+ */
+const toPascalCase = (str) => {
+  return str
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[^a-zA-Z0-9]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('');
+};
+
+/**
+ * Extract the pathname from a URL string.
+ * e.g. "https://example.com/banking/efx/v1" -> "/banking/efx/v1"
+ */
+const extractUrlPath = (urlString) => {
+  try {
+    const url = new URL(urlString);
+    return url.pathname === '/' ? '' : url.pathname;
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Recursively traverse a collection's item tree and extract all unique
+ * variable names used in request url.host fields (e.g. {{HostName}}).
+ * Returns an array of { varName, originalUrl, path } objects, filtered
+ * to only include variables whose values are actual URLs.
+ */
+const extractHostVariables = (collection) => {
+  const hostVarNames = new Set();
+
+  function traverse(items) {
+    for (const item of items) {
+      if (item.item) traverse(item.item);
+      if (item.request?.url?.host) {
+        for (const h of item.request.url.host) {
+          const m = h.match(/^\{\{(.+)\}\}$/);
+          if (m) hostVarNames.add(m[1]);
+        }
+      }
+    }
+  }
+  traverse(collection.item || []);
+
+  const collectionVars = collection.variable || [];
+  return Array.from(hostVarNames)
+    .map(varName => {
+      const varDef = collectionVars.find(v => v.key === varName);
+      const originalUrl = varDef?.value || '';
+      const path = extractUrlPath(originalUrl);
+      return { varName, originalUrl, path };
+    })
+    .filter(hv => hv.originalUrl.includes('://'));
+};
 
 // ============================================================================
 // MODULE: WORKSPACE
@@ -542,6 +603,28 @@ const CollectionsAPI = {
       };
     }
   },
+
+  /**
+   * Update a collection's variables via partial update
+   * PATCH /collections/{collectionId}
+   * @param {string} collectionUid - Collection UID to update
+   * @param {Array} variables - Full variable array to set on the collection
+   */
+  async patchVariables(collectionUid, variables) {
+    try {
+      const response = await api.patch(`/collections/${collectionUid}`, {
+        collection: {
+          variable: variables,
+        },
+      });
+      return { success: true, collection: response.data.collection };
+    } catch (error) {
+      return {
+        success: false,
+        error: logApiError('Patch collection variables', error, { collectionUid })
+      };
+    }
+  },
 };
 
 /**
@@ -550,8 +633,10 @@ const CollectionsAPI = {
  */
 const CollectionsHelper = {
   /**
-   * Copy all collections from source to target workspace
-   * Stores mapping in Store.collections
+   * Copy all collections from source to target workspace.
+   * After forking, fetches full collection details to extract host variables
+   * (variable names used in request URLs and their URL paths).
+   * Stores mapping in Store.collections including hostVariables.
    */
   async copyAll(sourceWorkspaceId, targetWorkspaceId) {
     const results = { success: [], failed: [] };
@@ -573,17 +658,29 @@ const CollectionsHelper = {
       );
       
       if (forkResult.success) {
-        // Store mapping
+        // Fetch full details of the forked collection to extract host variables
+        let hostVariables = [];
+        const collDetails = await CollectionsAPI.getDetails(forkResult.collection.uid);
+        if (collDetails) {
+          hostVariables = extractHostVariables(collDetails);
+          if (hostVariables.length > 0) {
+            log.detail(`Found host variable(s): ${hostVariables.map(hv => `${hv.varName}${hv.path ? ' (path: ' + hv.path + ')' : ''}`).join(', ')}`);
+          }
+        }
+
         Store.collections.set(collection.uid, {
           sourceUid: collection.uid,
           targetUid: forkResult.collection.uid,
           name: collection.name,
+          hostVariables,
+          collectionDetails: collDetails,
         });
         
         results.success.push({
           name: collection.name,
           sourceUid: collection.uid,
           targetUid: forkResult.collection.uid,
+          hostVariables,
         });
         log.success(`Forked: ${collection.name}`);
       } else {
@@ -607,6 +704,53 @@ const CollectionsHelper = {
       }
     }
     return null;
+  },
+
+  /**
+   * Update all forked collections' variables to reference mock env variable names.
+   * For each host variable found in a collection, replaces its value with {{mockEnvVarName}}.
+   */
+  async updateAllVariables(mockEnvVarMap) {
+    const results = { success: [], failed: [] };
+
+    for (const [, collData] of Store.collections) {
+      if (!collData.hostVariables || collData.hostVariables.length === 0) continue;
+      if (!collData.collectionDetails) continue;
+
+      const existingVars = collData.collectionDetails.variable || [];
+      const updatedVars = existingVars.map(v => {
+        const hv = collData.hostVariables.find(h => h.varName === v.key);
+        if (hv) {
+          const mockEnvVarName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
+          if (mockEnvVarName) {
+            return { ...v, value: `{{${mockEnvVarName}}}` };
+          }
+        }
+        return v;
+      });
+
+      const patchResult = await CollectionsAPI.patchVariables(collData.targetUid, updatedVars);
+      if (patchResult.success) {
+        const updatedNames = collData.hostVariables
+          .map(hv => mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`))
+          .filter(Boolean);
+        results.success.push({ name: collData.name, variables: updatedNames });
+        log.success(`Updated variables for: ${collData.name}`);
+        for (const hv of collData.hostVariables) {
+          const envName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
+          if (envName) {
+            log.detail(`${hv.varName} -> {{${envName}}}`);
+          }
+        }
+      } else {
+        results.failed.push({ name: collData.name, error: patchResult.error });
+        log.error(`Failed to update variables for "${collData.name}": ${patchResult.error}`);
+      }
+
+      await delay(300);
+    }
+
+    return results;
   },
 };
 
@@ -738,44 +882,66 @@ const MocksHelper = {
   },
 
   /**
-   * Generate environment variables from mock URLs
-   * Creates variable entries for each mock URL
+   * Generate environment variables from mock URLs using host variable detection.
+   * For each collection, for each host variable found in its requests, creates a
+   * mock env variable named {camelCaseCollectionName}{PascalCaseVarName} with the
+   * mock server URL + the original URL's path appended.
+   *
+   * Also builds a mapping (mockEnvVarMap) used later to update collection variables.
+   * The map key is "{targetCollectionUid}:{hostVarName}" -> mockEnvVarName.
+   *
+   * @returns {{ variables: Array, mockEnvVarMap: Map<string, string> }}
    */
   generateMockUrlVariables() {
     const variables = [];
-    
-    for (const [collectionUid, mockData] of Store.mocks) {
-      // Create a variable name from the collection name
-      // e.g., "Payment Services" -> "paymentServices_mockUrl"
-      const varName = mockData.collectionName
+    const mockEnvVarMap = new Map();
+
+    const toCamelCase = (name) => {
+      return name
         .replace(/[^a-zA-Z0-9\s]/g, '')
         .split(/\s+/)
-        .map((word, index) => 
-          index === 0 
-            ? word.toLowerCase() 
+        .map((word, index) =>
+          index === 0
+            ? word.toLowerCase()
             : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
         )
-        .join('') + '_mockUrl';
-      
-      variables.push({
-        key: varName,
-        value: mockData.mockUrl,
-        enabled: true,
-        type: 'default',
-      });
+        .join('');
+    };
+
+    for (const [sourceUid, collData] of Store.collections) {
+      const mockData = Store.mocks.get(collData.targetUid);
+      if (!mockData) continue;
+
+      const hostVars = collData.hostVariables || [];
+      if (hostVars.length === 0) {
+        // Fallback: no host variables detected, use collection-level naming
+        const varName = toCamelCase(collData.name) + 'BaseUrl';
+        variables.push({
+          key: varName,
+          value: mockData.mockUrl,
+          enabled: true,
+          type: 'default',
+        });
+        continue;
+      }
+
+      for (const hv of hostVars) {
+        const collectionPart = toCamelCase(collData.name);
+        const varPart = toPascalCase(hv.varName);
+        const envVarName = collectionPart + varPart;
+
+        variables.push({
+          key: envVarName,
+          value: mockData.mockUrl + hv.path,
+          enabled: true,
+          type: 'default',
+        });
+
+        mockEnvVarMap.set(`${collData.targetUid}:${hv.varName}`, envVarName);
+      }
     }
-    
-    // Also add a general baseUrl variable with the first mock URL
-    if (variables.length > 0) {
-      variables.unshift({
-        key: 'baseUrl',
-        value: variables[0].value,
-        enabled: true,
-        type: 'default',
-      });
-    }
-    
-    return variables;
+
+    return { variables, mockEnvVarMap };
   },
 };
 
@@ -953,14 +1119,15 @@ const EnvironmentsHelper = {
   },
 
   /**
-   * Update Mock Env with new mock URLs, or create new Mock Env if not found
+   * Update Mock Env with new mock URLs, or create new Mock Env if not found.
+   * Returns the mockEnvVarMap needed for the collection variable update step.
    */
   async updateOrCreateMockEnv(targetWorkspaceId) {
-    const mockUrlVariables = MocksHelper.generateMockUrlVariables();
+    const { variables: mockUrlVariables, mockEnvVarMap } = MocksHelper.generateMockUrlVariables();
     
     if (mockUrlVariables.length === 0) {
       log.warn('No mock URLs to add to environment');
-      return { success: false, error: 'No mock URLs available' };
+      return { success: false, error: 'No mock URLs available', mockEnvVarMap };
     }
     
     // Try to find existing Mock Env
@@ -974,12 +1141,11 @@ const EnvironmentsHelper = {
       const envDetails = await EnvironmentsAPI.getDetails(existingMockEnv.targetUid);
       
       if (!envDetails) {
-        return { success: false, error: 'Could not get environment details' };
+        return { success: false, error: 'Could not get environment details', mockEnvVarMap };
       }
       
       // Merge existing variables with new mock URL variables
       const existingValues = envDetails.values || [];
-      const existingKeys = new Set(existingValues.map(v => v.key));
       
       // Add new variables, update existing ones
       const mergedValues = [...existingValues];
@@ -1000,9 +1166,9 @@ const EnvironmentsHelper = {
       
       if (updateResult.success) {
         log.success(`Updated "${existingMockEnv.name}" with ${mockUrlVariables.length} mock URL variable(s)`);
-        return { success: true, environment: updateResult.environment, action: 'updated' };
+        return { success: true, environment: updateResult.environment, action: 'updated', mockEnvVarMap };
       } else {
-        return { success: false, error: updateResult.error };
+        return { success: false, error: updateResult.error, mockEnvVarMap };
       }
     } else {
       // Create new Mock Env
@@ -1023,9 +1189,9 @@ const EnvironmentsHelper = {
         });
         
         log.success(`Created "Mock Env" with ${mockUrlVariables.length} mock URL variable(s)`);
-        return { success: true, environment: createResult.environment, action: 'created' };
+        return { success: true, environment: createResult.environment, action: 'created', mockEnvVarMap };
       } else {
-        return { success: false, error: createResult.error };
+        return { success: false, error: createResult.error, mockEnvVarMap };
       }
     }
   },
@@ -1499,6 +1665,7 @@ async function runProvisioningWorkflow() {
     mocks: { total: 0, success: 0, failed: [] },
     environments: { total: 0, success: 0, failed: [] },
     mockEnvUpdate: { success: false, action: null },
+    collectionVarUpdate: { total: 0, success: 0, failed: [] },
     specs: { total: 0, success: 0, failed: [] },
     admins: { total: 0, success: 0, failed: [] },
     invitations: { total: 0, success: 0, failed: [], links: [] },
@@ -1615,9 +1782,23 @@ async function runProvisioningWorkflow() {
   results.mockEnvUpdate = mockEnvResult;
 
   // =========================================================================
-  // STEP 5: COPY SPECS
+  // STEP 5: UPDATE COLLECTION VARIABLES
   // =========================================================================
-  log.step('Step 5: Copying spec files...');
+  log.step('Step 5: Updating collection variables to reference mock env...');
+
+  if (mockEnvResult.mockEnvVarMap && mockEnvResult.mockEnvVarMap.size > 0) {
+    const collVarResults = await CollectionsHelper.updateAllVariables(mockEnvResult.mockEnvVarMap);
+    results.collectionVarUpdate.total = collVarResults.success.length + collVarResults.failed.length;
+    results.collectionVarUpdate.success = collVarResults.success.length;
+    results.collectionVarUpdate.failed = collVarResults.failed;
+  } else {
+    log.info('No mock env variable mappings available. Skipping.');
+  }
+
+  // =========================================================================
+  // STEP 6: COPY SPECS
+  // =========================================================================
+  log.step('Step 6: Copying spec files...');
   
   const specResults = await SpecsHelper.copyAll(POSTMAN_SOURCE_WORKSPACE_ID, targetWorkspaceId);
   results.specs.total = specResults.success.length + specResults.failed.length;
@@ -1625,10 +1806,10 @@ async function runProvisioningWorkflow() {
   results.specs.failed = specResults.failed;
 
   // =========================================================================
-  // STEP 6: ADD TEAM ADMINS (if configured)
+  // STEP 7: ADD TEAM ADMINS (if configured)
   // =========================================================================
   if (adminUserIds.length > 0) {
-    log.step('Step 6: Adding workspace admins...');
+    log.step('Step 7: Adding workspace admins...');
     
     const adminResults = await WorkspaceRolesHelper.addAllAdmins(targetWorkspaceId, adminUserIds);
     results.admins.total = adminResults.success.length + adminResults.failed.length;
@@ -1642,15 +1823,15 @@ async function runProvisioningWorkflow() {
       });
     }
   } else {
-    log.step('Step 6: Adding workspace admins...');
+    log.step('Step 7: Adding workspace admins...');
     log.info('No admin user IDs configured (POSTMAN_ADMIN_USER_IDS). Skipping.');
   }
 
   // =========================================================================
-  // STEP 7: INVITE PARTNERS (if configured)
+  // STEP 8: INVITE PARTNERS (if configured)
   // =========================================================================
   if (partnerEmails.length > 0) {
-    log.step('Step 7: Inviting partners...');
+    log.step('Step 8: Inviting partners...');
     
     const inviteResults = await InvitationsHelper.inviteAllPartners(targetWorkspaceId, partnerEmails, PARTNER_ROLE_ID);
     results.invitations.total = inviteResults.success.length + inviteResults.failed.length;
@@ -1675,7 +1856,7 @@ async function runProvisioningWorkflow() {
       }
     }
   } else {
-    log.step('Step 7: Inviting partners...');
+    log.step('Step 8: Inviting partners...');
     log.info('No partner emails configured (PARTNER_EMAILS). Skipping.');
   }
 
@@ -1692,13 +1873,14 @@ async function runProvisioningWorkflow() {
   console.log('');
   
   console.log('\x1b[1mResults Summary:\x1b[0m');
-  console.log(`  Collections:  ${results.collections.success}/${results.collections.total} copied`);
-  console.log(`  Mock Servers: ${results.mocks.success}/${results.mocks.total} created`);
-  console.log(`  Environments: ${results.environments.success}/${results.environments.total} copied`);
-  console.log(`  Mock Env:     ${results.mockEnvUpdate.success ? results.mockEnvUpdate.action : 'failed'}`);
-  console.log(`  Specs:        ${results.specs.success}/${results.specs.total} copied`);
-  console.log(`  Admins:       ${results.admins.success}/${results.admins.total} added`);
-  console.log(`  Partners:     ${results.invitations.success}/${results.invitations.total} invited`);
+  console.log(`  Collections:      ${results.collections.success}/${results.collections.total} copied`);
+  console.log(`  Mock Servers:     ${results.mocks.success}/${results.mocks.total} created`);
+  console.log(`  Environments:     ${results.environments.success}/${results.environments.total} copied`);
+  console.log(`  Mock Env:         ${results.mockEnvUpdate.success ? results.mockEnvUpdate.action : 'failed'}`);
+  console.log(`  Collection Vars:  ${results.collectionVarUpdate.success}/${results.collectionVarUpdate.total} updated`);
+  console.log(`  Specs:            ${results.specs.success}/${results.specs.total} copied`);
+  console.log(`  Admins:           ${results.admins.success}/${results.admins.total} added`);
+  console.log(`  Partners:         ${results.invitations.success}/${results.invitations.total} invited`);
   
   // Show mock URLs
   if (Store.mocks.size > 0) {
@@ -1733,6 +1915,7 @@ async function runProvisioningWorkflow() {
     ...results.collections.failed.map(f => ({ type: 'Collection', ...f })),
     ...results.mocks.failed.map(f => ({ type: 'Mock', ...f })),
     ...results.environments.failed.map(f => ({ type: 'Environment', ...f })),
+    ...results.collectionVarUpdate.failed.map(f => ({ type: 'Collection Var Update', ...f })),
     ...results.specs.failed.map(f => ({ type: 'Spec', ...f })),
     ...results.admins.failed.map(f => ({ type: 'Admin', name: f.userId, error: f.error })),
     ...results.invitations.failed.map(f => ({ type: 'Partner', name: f.email, error: f.error })),
@@ -1793,6 +1976,9 @@ export {
   SpecsHelper,
   Store,
   runProvisioningWorkflow,
+  extractHostVariables,
+  extractUrlPath,
+  toPascalCase,
 };
 
 // Run if executed directly

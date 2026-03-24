@@ -32,15 +32,20 @@ These tools automate the process of creating and managing Postman partner worksp
 ### Complete Provisioning Workflow
 
 ```
-1. Workspace Creation     → Create new partner workspace (or use existing)
-2. Copy Collections       → Fork all collections from source workspace
-3. Create Mock Servers    → Generate mock servers for each collection
-4. Copy Environments      → Duplicate environment configurations
-5. Update Mock Env        → Create/update "Mock Env" with mock server URLs
-6. Copy API Specs         → Transfer all API specification files
-7. Add Team Admins        → Add internal team members as workspace admins
-8. Invite Partners        → Send partner invitations with invitation links
+1. Workspace Creation         → Create new partner workspace (or use existing)
+2. Copy Collections           → Fork all collections + extract host variable URLs
+3. Create Mock Servers        → Generate mock servers for each collection
+4. Copy Environments          → Duplicate environment configurations
+5. Update Mock Env            → Create/update "Mock Env" with mock URLs (full paths)
+6. Update Collection Vars     → Map collection host variables to mock env references
+7. Copy API Specs             → Transfer all API specification files
+8. Add Team Admins            → Add internal team members as workspace admins
+9. Invite Partners            → Send partner invitations with invitation links
 ```
+
+> **Mock URL Path Resolution**: When creating mock environment variables, the system inspects each collection's request URLs to find host variables (e.g. `{{HostName}}`, `{{baseUrl}}`), extracts the URL path from each, and appends it to the mock server URL. This ensures the mock env variable contains the full path (e.g. `https://abc.mock.pstmn.io/banking/efx/v1`).
+>
+> **Collection Variable Mapping**: After mock env variables are created, each forked collection's host variables are updated to reference the corresponding mock env variable (e.g. `baseUrl` → `{{directDebitsApiBaseUrl}}`), creating a seamless connection between collections and their mock servers.
 
 ### Reset Workflow
 
@@ -55,9 +60,10 @@ Deletes workspace resources in reverse dependency order:
 ## Features
 
 ### Complete Workspace Provisioning
-- Automated collection forking
-- Mock server creation and URL management
-- Environment variable handling
+- Automated collection forking with host variable detection
+- Mock server creation with full URL path resolution
+- Environment variable handling with intelligent mock URL naming
+- Collection variable auto-mapping to mock environment references
 - Multi-file API specification copying
 - Team member management (add admins)
 - Partner invitation with "Run in Postman" links
@@ -355,13 +361,14 @@ The provisioning follows a specific order to ensure dependencies are met:
 |------|-------|-------------|
 | 1 | Validation | Verify API key and workspaces |
 | 2 | Workspace | Create or verify target workspace |
-| 3 | Collections | Fork collections (basis for mocks) |
+| 3 | Collections | Fork collections and extract host variable URLs |
 | 4 | Mock Servers | Create for each collection |
 | 5 | Environments | Copy with original variables |
-| 6 | Mock Environment | Update/create with mock URLs |
-| 7 | API Specs | Copy specification files |
-| 8 | Admins | Add team members as workspace admins |
-| 9 | Partners | Invite partners and generate invitation links |
+| 6 | Mock Environment | Update/create with mock URLs (with full URL paths) |
+| 7 | Collection Variables | Update collection host vars to reference mock env vars |
+| 8 | API Specs | Copy specification files |
+| 9 | Admins | Add team members as workspace admins |
+| 10 | Partners | Invite partners and generate invitation links |
 
 ### Reset Order
 

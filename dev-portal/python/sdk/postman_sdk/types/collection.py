@@ -57,9 +57,18 @@ class ForkResult(BaseModel):
     error: str | None = None
 
 
+class HostVariableInfo(BaseModel):
+    """Info about a host variable extracted from a collection"""
+    var_name: str
+    original_url: str
+    path: str
+
+
 class CollectionMapping(BaseModel):
     """Collection mapping (source to target)"""
     source_uid: str
     target_uid: str
     name: str
     mock_url: str | None = None
+    host_variables: list[HostVariableInfo] = Field(default_factory=list)
+    collection_details: dict[str, Any] | None = None

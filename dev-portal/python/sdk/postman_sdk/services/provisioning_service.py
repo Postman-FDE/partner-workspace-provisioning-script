@@ -7,6 +7,7 @@ Full workspace provisioning workflow
 import asyncio
 import re
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from postman_sdk.client import PostmanClient
 from postman_sdk.types import (
@@ -21,6 +22,7 @@ from postman_sdk.types import (
     EnvironmentVariable,
     ProgressEvent,
     CreateSpecFile,
+    HostVariableInfo,
 )
 
 ProgressCallback = Callable[[ProgressEvent], None]
@@ -87,7 +89,12 @@ class ProvisioningService:
 
         # Step 5: Update mock env
         self._emit_progress("mockEnv", "Updating mock environment...")
-        await self._update_mock_environment(target_workspace_id)
+        mock_env_var_map = await self._update_mock_environment(target_workspace_id)
+
+        # Step 5b: Update collection variables to reference mock env vars
+        if mock_env_var_map:
+            self._emit_progress("collectionVars", "Updating collection variables...")
+            await self._update_collection_variables(mock_env_var_map)
 
         # Step 6: Copy specs
         self._emit_progress("specs", "Copying specs...")
@@ -143,10 +150,17 @@ class ProvisioningService:
             )
 
             if fork_result.success and fork_result.collection:
+                target_uid = fork_result.collection.uid
+                details = await self.client.get_collection_details(target_uid)
+                coll_dict = details.model_dump(by_alias=True) if details else {}
+                host_variables = self._extract_host_variables(coll_dict) if coll_dict else []
+
                 mapping = CollectionMapping(
                     source_uid=collection.uid,
-                    target_uid=fork_result.collection.uid,
+                    target_uid=target_uid,
                     name=collection.name,
+                    host_variables=host_variables,
+                    collection_details=coll_dict if coll_dict else None,
                 )
                 self._collection_mappings[collection.uid] = mapping
                 result["collections"]["mappings"].append(mapping.model_dump())
@@ -228,12 +242,11 @@ class ProvisioningService:
 
             await asyncio.sleep(0.3)
 
-    async def _update_mock_environment(self, target_workspace_id: str) -> None:
-        mock_url_variables = self._generate_mock_url_variables()
+    async def _update_mock_environment(self, target_workspace_id: str) -> dict[str, str]:
+        mock_url_variables, mock_env_var_map = self._generate_mock_url_variables()
         if not mock_url_variables:
-            return
+            return mock_env_var_map
 
-        # Find existing Mock Env
         mock_env_mapping = None
         for mapping in self._environment_mappings.values():
             if any(mapping.name.lower() == name.lower() for name in self.mock_env_names):
@@ -248,16 +261,52 @@ class ProvisioningService:
         else:
             await self.client.create_environment("Mock Env", mock_url_variables, target_workspace_id)
 
-    def _generate_mock_url_variables(self) -> list[EnvironmentVariable]:
-        variables = []
-        for mock_mapping in self._mock_mappings.values():
-            var_name = self._to_variable_name(mock_mapping.collection_name) + "_mockUrl"
-            variables.append(EnvironmentVariable(key=var_name, value=mock_mapping.mock_url, enabled=True))
+        return mock_env_var_map
 
-        if variables:
-            variables.insert(0, EnvironmentVariable(key="baseUrl", value=variables[0].value, enabled=True))
+    async def _update_collection_variables(self, mock_env_var_map: dict[str, str]) -> None:
+        if not mock_env_var_map:
+            return
 
-        return variables
+        for coll_mapping in self._collection_mappings.values():
+            host_vars = coll_mapping.host_variables or []
+            coll_details = coll_mapping.collection_details
+            if not host_vars or not coll_details:
+                continue
+
+            existing_vars = coll_details.get('variable', [])
+            updated_vars = []
+            for v in existing_vars:
+                hv = next((h for h in host_vars if h.var_name == v.get('key')), None)
+                if hv:
+                    env_name = mock_env_var_map.get(f"{coll_mapping.target_uid}:{hv.var_name}")
+                    if env_name:
+                        updated_vars.append({**v, 'value': f'{{{{{env_name}}}}}'})
+                        continue
+                updated_vars.append(v)
+
+            await self.client.patch_collection_variables(coll_mapping.target_uid, updated_vars)
+
+    def _generate_mock_url_variables(self) -> tuple[list[EnvironmentVariable], dict[str, str]]:
+        variables: list[EnvironmentVariable] = []
+        mock_env_var_map: dict[str, str] = {}
+
+        for source_uid, coll_mapping in self._collection_mappings.items():
+            mock_mapping = self._mock_mappings.get(coll_mapping.target_uid)
+            if not mock_mapping:
+                continue
+
+            host_vars = coll_mapping.host_variables or []
+            if not host_vars:
+                var_name = self._to_variable_name(coll_mapping.name) + 'BaseUrl'
+                variables.append(EnvironmentVariable(key=var_name, value=mock_mapping.mock_url, enabled=True))
+                continue
+
+            for hv in host_vars:
+                env_var_name = self._to_variable_name(coll_mapping.name) + self._to_pascal_case(hv.var_name)
+                variables.append(EnvironmentVariable(key=env_var_name, value=mock_mapping.mock_url + hv.path, enabled=True))
+                mock_env_var_map[f"{coll_mapping.target_uid}:{hv.var_name}"] = env_var_name
+
+        return variables, mock_env_var_map
 
     def _to_variable_name(self, name: str) -> str:
         clean = re.sub(r"[^a-zA-Z0-9\s]", "", name)
@@ -266,6 +315,46 @@ class ProvisioningService:
             w.lower() if i == 0 else w.capitalize()
             for i, w in enumerate(words)
         )
+
+    def _to_pascal_case(self, s: str) -> str:
+        s = re.sub(r'([a-z])([A-Z])', r'\1 \2', s)
+        s = re.sub(r'[^a-zA-Z0-9]', ' ', s)
+        return ''.join(word.capitalize() for word in s.split() if word)
+
+    def _extract_url_path(self, url_string: str) -> str:
+        try:
+            parsed = urlparse(url_string)
+            return '' if parsed.path == '/' else parsed.path
+        except Exception:
+            return ''
+
+    def _extract_host_variables(self, collection: dict) -> list[HostVariableInfo]:
+        host_var_names: set[str] = set()
+
+        def traverse(items: list):
+            for item in items:
+                if 'item' in item and isinstance(item['item'], list):
+                    traverse(item['item'])
+                request = item.get('request', {})
+                if isinstance(request, dict):
+                    url = request.get('url', {})
+                    if isinstance(url, dict):
+                        for h in url.get('host', []):
+                            m = re.match(r'^\{\{(.+)\}\}$', str(h))
+                            if m:
+                                host_var_names.add(m.group(1))
+
+        traverse(collection.get('item', []))
+
+        collection_vars = collection.get('variable', [])
+        result = []
+        for var_name in host_var_names:
+            var_def = next((v for v in collection_vars if v.get('key') == var_name), None)
+            original_url = var_def.get('value', '') if var_def else ''
+            if '://' in original_url:
+                path = self._extract_url_path(original_url)
+                result.append(HostVariableInfo(var_name=var_name, original_url=original_url, path=path))
+        return result
 
     def _merge_variables(
         self, existing: list[EnvironmentVariable], new_vars: list[EnvironmentVariable]

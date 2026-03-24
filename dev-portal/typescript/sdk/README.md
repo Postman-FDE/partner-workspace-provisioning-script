@@ -59,6 +59,8 @@ const workspace = await client.getWorkspace('workspace-id');
 - Full TypeScript type safety
 - All Postman API endpoints
 - High-level services for provisioning and reset workflows
+- Mock URL path resolution — extracts URL paths from collection host variables and appends them to mock server URLs
+- Collection variable mapping — patches forked collections to reference mock environment variables
 - Automatic retry with exponential backoff
 - Progress callbacks for long-running operations
 
@@ -85,6 +87,7 @@ const workspace = await client.getWorkspace('workspace-id');
 | **Partners** | `client.removePartner()` | Remove partner from workspace |
 | **Collections** | `client.getCollections()` | Get all collections |
 | **Collections** | `client.forkCollection()` | Fork a collection |
+| **Collections** | `client.patchCollectionVariables()` | Update collection variables |
 | **Collections** | `client.deleteCollection()` | Delete a collection |
 | **Environments** | `client.getEnvironments()` | Get all environments |
 | **Environments** | `client.createEnvironment()` | Create environment |
@@ -101,7 +104,7 @@ const workspace = await client.getWorkspace('workspace-id');
 
 ### `ProvisioningService.provision()` - Full Provisioning
 
-Copies all collections, creates mocks, copies environments, copies specs, adds admins, and invites partners.
+Copies all collections, creates mocks, copies environments, creates a mock environment with path-resolved mock URLs, patches collection variables to reference the mock environment, copies specs, adds admins, and invites partners.
 
 ```typescript
 import { PostmanClient, ProvisioningService } from '@postman/workspace-sdk';
@@ -154,6 +157,7 @@ interface ProvisioningResult {
   mocks: { total: number; success: number; failed: FailedItem[]; urls: Record<string, string> };
   environments: { total: number; success: number; failed: FailedItem[]; successData: EnvironmentMapping[] };
   mockEnv: { success: boolean; action: 'created' | 'updated' | null };
+  collectionVariables: { total: number; success: number; failed: FailedItem[] };
   specs: { total: number; success: number; failed: FailedItem[]; successData: SpecMapping[] };
   admins: { total: number; success: number; failed: FailedItem[]; successData: AdminResult[] };
   invitations: { total: number; success: number; failed: FailedItem[]; links: InvitationLink[] };
@@ -162,7 +166,7 @@ interface ProvisioningResult {
 
 interface ProgressEvent {
   phase: 'validation' | 'workspace' | 'collections' | 'mocks' | 'environments' | 
-         'mockEnv' | 'specs' | 'admins' | 'partners' | 'complete' | 'error';
+         'mockEnv' | 'updateCollectionVars' | 'specs' | 'admins' | 'partners' | 'complete' | 'error';
   message: string;
   progress: number;
   current?: number;
@@ -801,6 +805,7 @@ const client = new PostmanClient({
 | `createMock(name, collectionUid, wsId)` | `Promise<{success, mock?, error?}>` | Create mock server |
 | `getSpecs(workspaceId)` | `Promise<Spec[]>` | Get all specs |
 | `createSpec(wsId, name, type, files)` | `Promise<{success, spec?, error?}>` | Create spec |
+| `patchCollectionVariables(collectionUid, variables)` | `Promise<{success, error?}>` | Update collection variables |
 | `invitePartner(wsId, email, roleId)` | `Promise<InvitationResult>` | Invite partner |
 
 ---
@@ -816,10 +821,11 @@ const client = new PostmanClient({
 | 3 | Collections | Fork collections (basis for mocks) |
 | 4 | Mock Servers | Create for each collection |
 | 5 | Environments | Copy with original variables |
-| 6 | Mock Environment | Update/create with mock URLs |
-| 7 | API Specs | Copy specification files |
-| 8 | Admins | Add team members as workspace admins |
-| 9 | Partners | Invite partners and generate invitation links |
+| 6 | Mock Environment | Create/update env with path-resolved mock URLs (e.g., `directDebitsApiBaseUrl`) |
+| 7 | Update Collection Variables | Patch forked collections to reference mock env variables |
+| 8 | API Specs | Copy specification files |
+| 9 | Admins | Add team members as workspace admins |
+| 10 | Partners | Invite partners and generate invitation links |
 
 ### Reset Order
 

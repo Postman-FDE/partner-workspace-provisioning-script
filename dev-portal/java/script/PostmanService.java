@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -15,9 +16,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -199,6 +202,89 @@ public class PostmanService {
             return ex.getMessage();
         }
         return error instanceof Exception ? error.getMessage() : "Unknown error";
+    }
+
+    private String toPascalCase(String str) {
+        String spaced = str.replaceAll("([a-z])([A-Z])", "$1 $2")
+                           .replaceAll("[^a-zA-Z0-9]", " ");
+        StringBuilder sb = new StringBuilder();
+        for (String word : spaced.trim().split("\\s+")) {
+            if (!word.isEmpty()) {
+                sb.append(Character.toUpperCase(word.charAt(0)))
+                  .append(word.substring(1).toLowerCase());
+            }
+        }
+        return sb.toString();
+    }
+
+    private String toCamelCase(String name) {
+        String clean = name.replaceAll("[^a-zA-Z0-9\\s]", "");
+        String[] words = clean.trim().split("\\s+");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < words.length; i++) {
+            if (i == 0) {
+                sb.append(words[i].toLowerCase());
+            } else {
+                sb.append(Character.toUpperCase(words[i].charAt(0)))
+                  .append(words[i].substring(1).toLowerCase());
+            }
+        }
+        return sb.toString();
+    }
+
+    private String extractUrlPath(String urlString) {
+        try {
+            java.net.URI uri = new java.net.URI(urlString);
+            String path = uri.getPath();
+            return (path == null || path.equals("/")) ? "" : path;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> extractHostVariables(Map<String, Object> collection) {
+        Set<String> hostVarNames = new HashSet<>();
+
+        List<Map<String, Object>> items = (List<Map<String, Object>>) collection.getOrDefault("item", List.of());
+        traverseItems(items, hostVarNames);
+
+        List<Map<String, Object>> collectionVars = (List<Map<String, Object>>) collection.getOrDefault("variable", List.of());
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (String varName : hostVarNames) {
+            Map<String, Object> varDef = collectionVars.stream()
+                .filter(v -> varName.equals(v.get("key")))
+                .findFirst().orElse(null);
+            String originalUrl = varDef != null ? String.valueOf(varDef.getOrDefault("value", "")) : "";
+            if (originalUrl.contains("://")) {
+                String path = extractUrlPath(originalUrl);
+                result.add(Map.of("varName", varName, "originalUrl", originalUrl, "path", path));
+            }
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void traverseItems(List<Map<String, Object>> items, Set<String> hostVarNames) {
+        for (Map<String, Object> item : items) {
+            if (item.containsKey("item")) {
+                traverseItems((List<Map<String, Object>>) item.get("item"), hostVarNames);
+            }
+            Map<String, Object> request = (Map<String, Object>) item.get("request");
+            if (request != null) {
+                Map<String, Object> url = (request.get("url") instanceof Map) ? (Map<String, Object>) request.get("url") : null;
+                if (url != null) {
+                    List<String> hosts = (List<String>) url.getOrDefault("host", List.of());
+                    for (String h : hosts) {
+                        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^\\{\\{(.+)\\}\\}$").matcher(h);
+                        if (m.matches()) {
+                            hostVarNames.add(m.group(1));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ============================================================================
@@ -808,6 +894,16 @@ public class PostmanService {
                 .onErrorResume(e -> Mono.just(false));
     }
 
+    public Mono<Map<String, Object>> patchCollectionVariables(String collectionUid, List<Map<String, Object>> variables) {
+        return webClient.patch()
+                .uri("/collections/" + collectionUid)
+                .bodyValue(Map.of("collection", Map.of("variable", variables)))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .map(response -> Map.of("success", true, "collection", response.getOrDefault("collection", Map.of())))
+                .onErrorResume(e -> Mono.just(Map.of("success", false, "error", e.getMessage())));
+    }
+
     // ============================================================================
     // ENVIRONMENT MANAGEMENT
     // ============================================================================
@@ -1156,6 +1252,7 @@ public class PostmanService {
         Map<String, Object> invitations = (Map<String, Object>) results.get("invitations");
         @SuppressWarnings("unchecked")
         List<String> errors = (List<String>) results.get("errors");
+        Map<String, String> mockEnvVarMap = new HashMap<>();
 
         progress(onProgress, Map.of("phase", "collections", "message", "Copying collections...", "progress", 20));
 
@@ -1178,15 +1275,27 @@ public class PostmanService {
                                             if (forkResult.success()) {
                                                 int succ = (int) collections.get("success") + 1;
                                                 collections.put("success", succ);
-                                                collectionSuccess.add(Map.of("name", forkResult.collectionName(), "uid", forkResult.uid()));
-                                                collectionMap.put(uid, forkResult.uid());
+                                                return getCollectionDetails(forkResult.uid())
+                                                    .defaultIfEmpty(Map.of())
+                                                    .flatMap(collDetails -> {
+                                                        List<Map<String, Object>> hostVariables = collDetails.isEmpty()
+                                                            ? List.of() : extractHostVariables(collDetails);
+                                                        Map<String, Object> successEntry = new HashMap<>();
+                                                        successEntry.put("name", forkResult.collectionName());
+                                                        successEntry.put("uid", forkResult.uid());
+                                                        successEntry.put("hostVariables", hostVariables);
+                                                        successEntry.put("collectionDetails", collDetails);
+                                                        collectionSuccess.add(successEntry);
+                                                        collectionMap.put(uid, forkResult.uid());
+                                                        return delay(300);
+                                                    });
                                             } else {
                                                 @SuppressWarnings("unchecked")
                                                 List<Map<String, Object>> failed = (List<Map<String, Object>>) collections.get("failed");
                                                 failed.add(Map.of("name", name, "error", forkResult.error()));
                                                 errors.add("Failed to fork " + name + ": " + forkResult.error());
+                                                return delay(300);
                                             }
-                                            return delay(300);
                                         });
                             })
                             .then(Mono.defer(() -> {
@@ -1209,7 +1318,15 @@ public class PostmanService {
                                                             mocks.put("success", (int) mocks.get("success") + 1);
                                                             @SuppressWarnings("unchecked")
                                                             List<Map<String, Object>> urls = (List<Map<String, Object>>) mocks.get("urls");
-                                                            urls.add(Map.of("collectionName", collName, "mockName", mockResult.mockName(), "mockUrl", mockResult.mockUrl()));
+                                                            @SuppressWarnings("unchecked")
+                                                            List<Map<String, Object>> hostVars = (List<Map<String, Object>>) coll.getOrDefault("hostVariables", List.of());
+                                                            Map<String, Object> urlEntry = new HashMap<>();
+                                                            urlEntry.put("collectionName", collName);
+                                                            urlEntry.put("mockName", mockResult.mockName());
+                                                            urlEntry.put("mockUrl", mockResult.mockUrl());
+                                                            urlEntry.put("targetUid", collUid);
+                                                            urlEntry.put("hostVariables", hostVars);
+                                                            urls.add(urlEntry);
                                                         } else {
                                                             @SuppressWarnings("unchecked")
                                                             List<Map<String, Object>> mFailed = (List<Map<String, Object>>) mocks.get("failed");
@@ -1278,10 +1395,24 @@ public class PostmanService {
                                             if (!mockUrls.isEmpty()) {
                                                 progress(onProgress, Map.of("phase", "mockEnv", "message", "Updating Mock Environment...", "progress", 75));
                                                 List<Map<String, Object>> mockVars = new ArrayList<>();
-                                                for (int idx = 0; idx < mockUrls.size(); idx++) {
-                                                    Map<String, Object> mock = mockUrls.get(idx);
-                                                    mockVars.add(Map.of("key", "mock_url_" + (idx + 1), "value", mock.get("mockUrl"),
-                                                            "type", "default", "enabled", true, "description", "Mock server URL for " + mock.get("collectionName")));
+                                                for (Map<String, Object> mock : mockUrls) {
+                                                    @SuppressWarnings("unchecked")
+                                                    List<Map<String, Object>> hostVars = (List<Map<String, Object>>) mock.getOrDefault("hostVariables", List.of());
+                                                    if (hostVars.isEmpty()) {
+                                                        String varName = toCamelCase((String) mock.get("collectionName")) + "BaseUrl";
+                                                        mockVars.add(Map.of("key", varName, "value", mock.get("mockUrl"),
+                                                                "type", "default", "enabled", true));
+                                                    } else {
+                                                        for (Map<String, Object> hv : hostVars) {
+                                                            String envVarName = toCamelCase((String) mock.get("collectionName"))
+                                                                    + toPascalCase((String) hv.get("varName"));
+                                                            String mockUrlWithPath = mock.get("mockUrl")
+                                                                    + String.valueOf(hv.getOrDefault("path", ""));
+                                                            mockVars.add(Map.of("key", envVarName, "value", mockUrlWithPath,
+                                                                    "type", "default", "enabled", true));
+                                                            mockEnvVarMap.put(mock.get("targetUid") + ":" + hv.get("varName"), envVarName);
+                                                        }
+                                                    }
                                                 }
                                                 Optional<Map<String, Object>> mockEnvOpt = envMap.values().stream()
                                                         .filter(ed -> MOCK_ENV_NAMES.stream().anyMatch(n -> n.equalsIgnoreCase((String) ed.get("name"))))
@@ -1309,6 +1440,40 @@ public class PostmanService {
                                             return Mono.empty();
                                         }));
                             });
+                }))
+                .then(Mono.defer(() -> {
+                    if (mockEnvVarMap.isEmpty()) {
+                        return Mono.empty();
+                    }
+                    progress(onProgress, Map.of("phase", "collectionVars", "message", "Updating collection variables...", "progress", 78));
+                    return Flux.fromIterable(collectionSuccess)
+                            .concatMap(coll -> {
+                                @SuppressWarnings("unchecked")
+                                List<Map<String, Object>> hvList = (List<Map<String, Object>>) coll.getOrDefault("hostVariables", List.of());
+                                if (hvList.isEmpty()) return Mono.empty();
+                                @SuppressWarnings("unchecked")
+                                Map<String, Object> collDetails = (Map<String, Object>) coll.get("collectionDetails");
+                                if (collDetails == null || collDetails.isEmpty()) return Mono.empty();
+                                @SuppressWarnings("unchecked")
+                                List<Map<String, Object>> existingVars = (List<Map<String, Object>>) collDetails.getOrDefault("variable", List.of());
+                                List<Map<String, Object>> updatedVars = existingVars.stream().map(v -> {
+                                    String key = (String) v.get("key");
+                                    for (Map<String, Object> hv : hvList) {
+                                        if (hv.get("varName").equals(key)) {
+                                            String envName = mockEnvVarMap.get(coll.get("uid") + ":" + hv.get("varName"));
+                                            if (envName != null) {
+                                                Map<String, Object> updated = new HashMap<>(v);
+                                                updated.put("value", "{{" + envName + "}}");
+                                                return updated;
+                                            }
+                                        }
+                                    }
+                                    return v;
+                                }).collect(Collectors.toList());
+                                return patchCollectionVariables((String) coll.get("uid"), updatedVars)
+                                        .then(delay(300));
+                            })
+                            .then();
                 }))
                 .then(Mono.defer(() -> {
                     progress(onProgress, Map.of("phase", "specs", "message", "Copying specs...", "progress", 80));
@@ -1611,3 +1776,4 @@ public class PostmanService {
                 "specs", tuple.getT4()
         ));
     }
+}
