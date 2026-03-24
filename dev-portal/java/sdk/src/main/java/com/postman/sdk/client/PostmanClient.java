@@ -3,6 +3,7 @@ package com.postman.sdk.client;
 import com.postman.sdk.config.PostmanClientConfig;
 import com.postman.sdk.types.*;
 import org.springframework.stereotype.Service;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
@@ -121,11 +122,11 @@ public class PostmanClient {
         return webClient.get()
             .uri("/collections?workspace={workspaceId}", workspaceId)
             .retrieve()
-            .bodyToMono(Map.class)
+            .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
             .map(response -> {
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> collections = (List<Map<String, Object>>) response.get("collections");
-                return collections != null ? collections.stream().map(this::mapToCollection).toList() : List.of();
+                return collections != null ? collections.stream().map(this::mapToCollection).toList() : List.<Collection>of();
             })
             .onErrorResume(e -> Mono.just(List.of()))
             .retryWhen(defaultRetry());
@@ -178,7 +179,6 @@ public class PostmanClient {
      * Update a collection's variables via PATCH
      * PATCH /collections/{collectionId}
      */
-    @SuppressWarnings("unchecked")
     public Mono<ApiResponse<Void>> patchCollectionVariables(String collectionUid, List<Map<String, Object>> variables) {
         return webClient.patch()
             .uri("/collections/{uid}", collectionUid)
@@ -200,11 +200,11 @@ public class PostmanClient {
         return webClient.get()
             .uri("/environments?workspace={workspaceId}", workspaceId)
             .retrieve()
-            .bodyToMono(Map.class)
+            .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
             .map(response -> {
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> environments = (List<Map<String, Object>>) response.get("environments");
-                return environments != null ? environments.stream().map(this::mapToEnvironment).toList() : List.of();
+                return environments != null ? environments.stream().map(this::mapToEnvironment).toList() : List.<Environment>of();
             })
             .onErrorResume(e -> Mono.just(List.of()))
             .retryWhen(defaultRetry());
@@ -309,11 +309,11 @@ public class PostmanClient {
         return webClient.get()
             .uri("/mocks?workspace={workspaceId}", workspaceId)
             .retrieve()
-            .bodyToMono(Map.class)
+            .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
             .map(response -> {
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> mocks = (List<Map<String, Object>>) response.get("mocks");
-                return mocks != null ? mocks.stream().map(this::mapToMockServer).toList() : List.of();
+                return mocks != null ? mocks.stream().map(this::mapToMockServer).toList() : List.<MockServer>of();
             })
             .onErrorResume(e -> Mono.just(List.of()))
             .retryWhen(defaultRetry());
@@ -367,11 +367,11 @@ public class PostmanClient {
         return webClient.get()
             .uri("/specs?workspaceId={workspaceId}", workspaceId)
             .retrieve()
-            .bodyToMono(Map.class)
+            .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
             .map(response -> {
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> specs = (List<Map<String, Object>>) response.get("specs");
-                return specs != null ? specs.stream().map(this::mapToSpec).toList() : List.of();
+                return specs != null ? specs.stream().map(this::mapToSpec).toList() : List.<Spec>of();
             })
             .onErrorResume(e -> Mono.just(List.of()))
             .retryWhen(defaultRetry());
@@ -384,11 +384,11 @@ public class PostmanClient {
         return webClient.get()
             .uri("/specs/{specId}/files", specId)
             .retrieve()
-            .bodyToMono(Map.class)
+            .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
             .map(response -> {
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> files = (List<Map<String, Object>>) response.get("files");
-                return files != null ? files.stream().map(this::mapToSpecFile).toList() : List.of();
+                return files != null ? files.stream().map(this::mapToSpecFile).toList() : List.<SpecFile>of();
             })
             .onErrorResume(e -> Mono.just(List.of()))
             .retryWhen(defaultRetry());
@@ -422,7 +422,7 @@ public class PostmanClient {
             .uri("/specs?workspaceId={workspaceId}", workspaceId)
             .bodyValue(body)
             .retrieve()
-            .bodyToMono(Map.class)
+            .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
             .map(response -> ApiResponse.success(mapToSpec(response)))
             .onErrorResume(e -> Mono.just(ApiResponse.failure(getErrorMessage(e))));
     }
