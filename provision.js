@@ -255,6 +255,12 @@ const extractUrlPath = (urlString) => {
 
 const COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url'];
 
+const deriveCompanyName = (workspaceName) => {
+  if (!workspaceName) return null;
+  const match = workspaceName.match(/<>\s*(.+?)\s*Partner\s*Workspace/i);
+  return match ? match[1].trim() : null;
+};
+
 /**
  * Recursively traverse a collection's item tree and extract all unique
  * variable names used in request url.host fields (e.g. {{HostName}}).
@@ -361,6 +367,16 @@ const WorkspaceAPI = {
         success: false,
         error: logApiError('Create workspace', error, { name })
       };
+    }
+  },
+
+  async updateWorkspace(workspaceId, updates) {
+    try {
+      const response = await api.put(`/workspaces/${workspaceId}`, { workspace: updates });
+      return { success: true, workspace: response.data.workspace };
+    } catch (error) {
+      logApiError('Update workspace', error, { workspaceId });
+      return { success: false };
     }
   },
 };
@@ -1735,6 +1751,34 @@ async function runProvisioningWorkflow() {
     results.workspaceCreated = true;
     Store.targetWorkspace = createResult.workspace;
     log.success(`Created new workspace: ${createResult.workspace.name} (ID: ${createResult.workspace.id})`);
+  }
+
+  // =========================================================================
+  // COPY WORKSPACE DESCRIPTION
+  // =========================================================================
+  try {
+    const sourceDescription = sourceWorkspace.description;
+    if (sourceDescription) {
+      log.step('Copying workspace description from source...');
+      let finalDescription = sourceDescription;
+      const companyName = deriveCompanyName(runtimeConfig.workspaceName);
+      if (companyName) {
+        finalDescription = sourceDescription.replace(/<Company>/g, companyName);
+        log.info(`Replaced <Company> placeholder with "${companyName}"`);
+      } else {
+        log.warn('Could not derive company name from target workspace name — copying description as-is');
+      }
+      const updateResult = await WorkspaceAPI.updateWorkspace(targetWorkspaceId, { description: finalDescription });
+      if (updateResult.success) {
+        log.success('Workspace description updated successfully');
+      } else {
+        log.warn('Failed to update workspace description — continuing provisioning');
+      }
+    } else {
+      log.warn('Source workspace has no description — skipping description copy');
+    }
+  } catch (descError) {
+    log.warn(`Unexpected error copying workspace description: ${descError.message} — continuing provisioning`);
   }
 
   // =========================================================================

@@ -107,6 +107,19 @@ class PostmanClient:
         except Exception as e:
             return CreateWorkspaceResult(success=False, error=get_error_message(e))
 
+    async def update_workspace(
+        self, workspace_id: str, updates: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update a workspace via PUT /workspaces/{workspaceId}"""
+        try:
+            response = await self._http.put(
+                f"/workspaces/{workspace_id}", {"workspace": updates}
+            )
+            return {"success": True, "workspace": response.get("workspace")}
+        except Exception as e:
+            print(f"Error updating workspace: {e}")
+            return {"success": False}
+
     async def delete_workspace(self, workspace_id: str) -> bool:
         """Delete a workspace"""
         try:

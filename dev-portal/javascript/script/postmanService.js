@@ -15,6 +15,12 @@ const POSTMAN_API_BASE = "https://api.getpostman.com";
 
 const COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url'];
 
+const deriveCompanyName = (workspaceName) => {
+  if (!workspaceName) return null;
+  const match = workspaceName.match(/<>\s*(.+?)\s*Partner\s*Workspace/i);
+  return match ? match[1].trim() : null;
+};
+
 const headers = () => ({
   "Content-Type": "application/json",
   "X-Api-Key": POSTMAN_API_KEY || "",
@@ -159,6 +165,26 @@ export const getWorkspace = async (workspaceId) => {
   } catch (error) {
     console.error("Error getting workspace:", error);
     return null;
+  }
+};
+
+/**
+ * Update a workspace by ID.
+ * @param {string} workspaceId
+ * @param {object} updates - Fields to update (e.g. { description })
+ * @returns {Promise<{success: boolean, workspace?: object}>}
+ */
+export const updateWorkspace = async (workspaceId, updates) => {
+  try {
+    const response = await axios.put(
+      `${POSTMAN_API_BASE}/workspaces/${workspaceId}`,
+      { workspace: updates },
+      { headers: headers() }
+    );
+    return { success: true, workspace: response.data.workspace };
+  } catch (error) {
+    console.error("Error updating workspace:", extractError(error));
+    return { success: false };
   }
 };
 
@@ -1117,6 +1143,31 @@ export const provisionWorkspace = async (options, onProgress) => {
       results.workspaceCreated = true;
     }
 
+    // Copy workspace description from source
+    try {
+      const sourceDescription = sourceWorkspace.description;
+      if (sourceDescription) {
+        let finalDescription = sourceDescription;
+        const companyName = deriveCompanyName(workspaceName || results.workspace?.name);
+        if (companyName) {
+          finalDescription = sourceDescription.replace(/<Company>/g, companyName);
+          console.log(`Replaced <Company> placeholder with "${companyName}"`);
+        } else {
+          console.warn("Could not derive company name from target workspace name — copying description as-is");
+        }
+        const updateResult = await updateWorkspace(workspaceId, { description: finalDescription });
+        if (updateResult.success) {
+          console.log("Workspace description updated successfully");
+        } else {
+          console.warn("Failed to update workspace description — continuing provisioning");
+        }
+      } else {
+        console.warn("Source workspace has no description — skipping description copy");
+      }
+    } catch (descError) {
+      console.warn(`Unexpected error copying workspace description: ${descError.message} — continuing provisioning`);
+    }
+
     // Step 2: Copy Collections
     onProgress?.({ phase: "collections", message: "Copying collections...", progress: 20 });
     const sourceCollections = await getAllCollections(sourceWorkspaceId);
@@ -1487,6 +1538,31 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
       workspaceId = createResult.workspace.id;
       results.workspace = createResult.workspace;
       results.workspaceCreated = true;
+    }
+
+    // Copy workspace description from source
+    try {
+      const sourceDescription = sourceWorkspace.description;
+      if (sourceDescription) {
+        let finalDescription = sourceDescription;
+        const companyName = deriveCompanyName(workspaceName || results.workspace?.name);
+        if (companyName) {
+          finalDescription = sourceDescription.replace(/<Company>/g, companyName);
+          console.log(`Replaced <Company> placeholder with "${companyName}"`);
+        } else {
+          console.warn("Could not derive company name from target workspace name — copying description as-is");
+        }
+        const updateResult = await updateWorkspace(workspaceId, { description: finalDescription });
+        if (updateResult.success) {
+          console.log("Workspace description updated successfully");
+        } else {
+          console.warn("Failed to update workspace description — continuing provisioning");
+        }
+      } else {
+        console.warn("Source workspace has no description — skipping description copy");
+      }
+    } catch (descError) {
+      console.warn(`Unexpected error copying workspace description: ${descError.message} — continuing provisioning`);
     }
 
     if (copyCollections) {

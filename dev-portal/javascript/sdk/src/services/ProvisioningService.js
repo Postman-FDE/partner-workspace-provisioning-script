@@ -127,6 +127,9 @@ export class ProvisioningService {
       result.workspaceCreated = wsResult.created;
       const targetWorkspaceId = wsResult.workspace.id;
 
+      // Copy workspace description from source
+      await this._copyWorkspaceDescription(options.sourceWorkspaceId, targetWorkspaceId, options.workspaceName);
+
       // Phase 3: Copy collections
       this._emitProgress(onProgress, 'collections', 'Copying collections...', 15);
       await this._copyCollections(options.sourceWorkspaceId, targetWorkspaceId, store, result, onProgress);
@@ -223,6 +226,9 @@ export class ProvisioningService {
       result.workspace = wsResult.workspace;
       result.workspaceCreated = wsResult.created;
       const targetWorkspaceId = wsResult.workspace.id;
+
+      // Copy workspace description from source
+      await this._copyWorkspaceDescription(options.sourceWorkspaceId, targetWorkspaceId, options.workspaceName);
 
       let progress = 10;
       const steps = [copyCollections, copyMocks, copyEnvironments, createMockEnv, copySpecs, addAdmins, invitePartners]
@@ -338,6 +344,39 @@ export class ProvisioningService {
   _emitProgress(onProgress, phase, message, progress, extra = {}) {
     if (onProgress) {
       onProgress({ phase, message, progress, ...extra });
+    }
+  }
+
+  _deriveCompanyName(workspaceName) {
+    if (!workspaceName) return null;
+    const match = workspaceName.match(/<>\s*(.+?)\s*Partner\s*Workspace/i);
+    return match ? match[1].trim() : null;
+  }
+
+  async _copyWorkspaceDescription(sourceWorkspaceId, targetWorkspaceId, targetWorkspaceName) {
+    try {
+      const sourceWorkspace = await this.client.getWorkspace(sourceWorkspaceId);
+      const sourceDescription = sourceWorkspace?.description;
+      if (!sourceDescription) {
+        console.warn('Source workspace has no description — skipping description copy');
+        return;
+      }
+      let finalDescription = sourceDescription;
+      const companyName = this._deriveCompanyName(targetWorkspaceName);
+      if (companyName) {
+        finalDescription = sourceDescription.replace(/<Company>/g, companyName);
+        console.log(`Replaced <Company> placeholder with "${companyName}"`);
+      } else {
+        console.warn('Could not derive company name from target workspace name — copying description as-is');
+      }
+      const updateResult = await this.client.updateWorkspace(targetWorkspaceId, { description: finalDescription });
+      if (updateResult.success) {
+        console.log('Workspace description updated successfully');
+      } else {
+        console.warn('Failed to update workspace description — continuing provisioning');
+      }
+    } catch (err) {
+      console.warn(`Unexpected error copying workspace description: ${err.message} — continuing provisioning`);
     }
   }
 

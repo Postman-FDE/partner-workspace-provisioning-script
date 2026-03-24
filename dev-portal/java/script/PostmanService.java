@@ -1,5 +1,3 @@
-package com.postman.sdk.script;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -21,6 +19,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -35,6 +35,7 @@ public class PostmanService {
             "baseUrl", "baseurl", "base_url", "HostName", "hostname", "host",
             "apiUrl", "apiurl", "api_url", "serverUrl", "serverurl", "server_url"
     );
+    private static final Pattern COMPANY_NAME_PATTERN = Pattern.compile("<>\\s*(.+?)\\s*Partner\\s*Workspace", Pattern.CASE_INSENSITIVE);
 
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
@@ -378,6 +379,30 @@ public class PostmanService {
                 .onErrorResume(e -> {
                     return Mono.empty();
                 });
+    }
+
+    public Mono<Map<String, Object>> updateWorkspace(String workspaceId, Map<String, Object> updates) {
+        return webClient.put()
+                .uri("/workspaces/{id}", workspaceId)
+                .bodyValue(Map.of("workspace", updates))
+                .retrieve()
+                .bodyToMono(Map.class)
+                .map(response -> {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("workspace", response.get("workspace"));
+                    return result;
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Error updating workspace: " + e.getMessage());
+                    return Mono.just(Map.of("success", false));
+                });
+    }
+
+    private static String deriveCompanyName(String workspaceName) {
+        if (workspaceName == null || workspaceName.isEmpty()) return null;
+        Matcher matcher = COMPANY_NAME_PATTERN.matcher(workspaceName);
+        return matcher.find() ? matcher.group(1).trim() : null;
     }
 
     public Mono<Boolean> deleteWorkspace(String workspaceId) {
@@ -1237,6 +1262,9 @@ public class PostmanService {
                     if (sourceWorkspace == null) {
                         return Mono.error(new IllegalStateException("Source workspace not found: " + sourceWorkspaceId));
                     }
+                    String sourceDescription = sourceWorkspace.get("description") != null
+                            ? String.valueOf(sourceWorkspace.get("description")) : null;
+
                     String targetWorkspaceId = options.targetWorkspaceId();
                     progress(onProgress, Map.of("phase", "workspace", "message", targetWorkspaceId != null ? "Using existing workspace..." : "Creating new workspace...", "progress", 10));
 
@@ -1247,7 +1275,8 @@ public class PostmanService {
                                 .flatMap(existing -> {
                                     results.put("workspace", existing);
                                     results.put("workspaceCreated", false);
-                                    return doProvisionSteps(sourceWorkspaceId, targetWorkspaceId, options, onProgress, results);
+                                    return copyWorkspaceDescription(sourceDescription, options.workspaceName(), targetWorkspaceId)
+                                            .then(doProvisionSteps(sourceWorkspaceId, targetWorkspaceId, options, onProgress, results));
                                 });
                     } else {
                         if (options.workspaceName() == null || options.workspaceName().isEmpty()) {
@@ -1261,7 +1290,8 @@ public class PostmanService {
                                     String newId = createResult.workspace().id();
                                     results.put("workspace", Map.of("id", createResult.workspace().id(), "name", createResult.workspace().name(), "type", createResult.workspace().type()));
                                     results.put("workspaceCreated", true);
-                                    return doProvisionSteps(sourceWorkspaceId, newId, options, onProgress, results);
+                                    return copyWorkspaceDescription(sourceDescription, options.workspaceName(), newId)
+                                            .then(doProvisionSteps(sourceWorkspaceId, newId, options, onProgress, results));
                                 });
                     }
                 })
@@ -1273,6 +1303,39 @@ public class PostmanService {
                     progress(onProgress, Map.of("phase", "error", "message", "Error: " + e.getMessage(), "progress", 0, "results", results));
                     return Mono.error(e);
                 });
+    }
+
+    private Mono<Void> copyWorkspaceDescription(String sourceDescription, String targetWorkspaceName, String targetWorkspaceId) {
+        if (sourceDescription == null || sourceDescription.isEmpty()) {
+            System.out.println("WARNING: Source workspace has no description — skipping description copy");
+            return Mono.empty();
+        }
+        try {
+            String finalDescription = sourceDescription;
+            String companyName = deriveCompanyName(targetWorkspaceName);
+            if (companyName != null) {
+                finalDescription = sourceDescription.replace("<Company>", companyName);
+                System.out.println("Replaced <Company> placeholder with \"" + companyName + "\"");
+            } else {
+                System.out.println("WARNING: Could not derive company name from target workspace name — copying description as-is");
+            }
+            return updateWorkspace(targetWorkspaceId, Map.of("description", finalDescription))
+                    .doOnNext(result -> {
+                        if (Boolean.TRUE.equals(result.get("success"))) {
+                            System.out.println("Workspace description updated successfully");
+                        } else {
+                            System.out.println("WARNING: Failed to update workspace description — continuing provisioning");
+                        }
+                    })
+                    .onErrorResume(e -> {
+                        System.out.println("WARNING: Unexpected error copying workspace description: " + e.getMessage() + " — continuing provisioning");
+                        return Mono.empty();
+                    })
+                    .then();
+        } catch (Exception e) {
+            System.out.println("WARNING: Unexpected error copying workspace description: " + e.getMessage() + " — continuing provisioning");
+            return Mono.empty();
+        }
     }
 
     private Mono<ProvisionResult> doProvisionSteps(String sourceWorkspaceId, String workspaceId,

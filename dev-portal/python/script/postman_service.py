@@ -33,6 +33,13 @@ POSTMAN_API_BASE = "https://api.getpostman.com"
 COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url']
 
 
+def derive_company_name(workspace_name: Optional[str]) -> Optional[str]:
+    if not workspace_name:
+        return None
+    match = re.search(r'<>\s*(.+?)\s*Partner\s*Workspace', workspace_name, re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
 def _get_api_key() -> str:
     return os.environ.get("POSTMAN_API_KEY", "")
 
@@ -393,6 +400,25 @@ async def get_workspace(workspace_id: str) -> Optional[dict[str, Any]]:
     except Exception as e:
         print(f"Error getting workspace: {e}")
         return None
+
+
+async def update_workspace(
+    workspace_id: str,
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    """Update a workspace by ID via PUT /workspaces/{workspaceId}."""
+    try:
+        response = await _request(
+            "PUT",
+            f"{POSTMAN_API_BASE}/workspaces/{workspace_id}",
+            json={"workspace": updates},
+        )
+        response.raise_for_status()
+        data = response.json()
+        return {"success": True, "workspace": data.get("workspace")}
+    except Exception as e:
+        print(f"Error updating workspace: {e}")
+        return {"success": False}
 
 
 async def delete_workspace(workspace_id: str) -> bool:
@@ -1540,6 +1566,27 @@ async def provision_workspace(
         if not workspace_id:
             raise ValueError("Workspace ID is required")
 
+        # Copy workspace description from source
+        try:
+            source_description = source_workspace.get("description") if source_workspace else None
+            if source_description:
+                final_description = source_description
+                company_name = derive_company_name(workspace_name or (results.get("workspace") or {}).get("name"))
+                if company_name:
+                    final_description = source_description.replace("<Company>", company_name)
+                    print(f'Replaced <Company> placeholder with "{company_name}"')
+                else:
+                    print("WARNING: Could not derive company name from target workspace name — copying description as-is")
+                update_result = await update_workspace(workspace_id, {"description": final_description})
+                if update_result.get("success"):
+                    print("Workspace description updated successfully")
+                else:
+                    print("WARNING: Failed to update workspace description — continuing provisioning")
+            else:
+                print("WARNING: Source workspace has no description — skipping description copy")
+        except Exception as desc_err:
+            print(f"WARNING: Unexpected error copying workspace description: {desc_err} — continuing provisioning")
+
         # Step 2: Copy Collections
         if on_progress:
             on_progress({"phase": "collections", "message": "Copying collections...", "progress": 20})
@@ -2070,6 +2117,27 @@ async def provision_custom_workspace(
 
         if not workspace_id:
             raise ValueError("Workspace ID is required")
+
+        # Copy workspace description from source
+        try:
+            source_description = source_workspace.get("description") if source_workspace else None
+            if source_description:
+                final_description = source_description
+                company_name = derive_company_name(workspace_name or (results.get("workspace") or {}).get("name"))
+                if company_name:
+                    final_description = source_description.replace("<Company>", company_name)
+                    print(f'Replaced <Company> placeholder with "{company_name}"')
+                else:
+                    print("WARNING: Could not derive company name from target workspace name — copying description as-is")
+                update_result = await update_workspace(workspace_id, {"description": final_description})
+                if update_result.get("success"):
+                    print("Workspace description updated successfully")
+                else:
+                    print("WARNING: Failed to update workspace description — continuing provisioning")
+            else:
+                print("WARNING: Source workspace has no description — skipping description copy")
+        except Exception as desc_err:
+            print(f"WARNING: Unexpected error copying workspace description: {desc_err} — continuing provisioning")
 
         if copy_collections:
             if on_progress:

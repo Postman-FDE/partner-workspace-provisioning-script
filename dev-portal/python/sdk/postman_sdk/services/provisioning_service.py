@@ -75,6 +75,9 @@ class ProvisioningService:
         result["workspace_created"] = workspace_result.get("is_new", False)
         target_workspace_id = result["workspace"].id
 
+        # Copy workspace description from source
+        await self._copy_workspace_description(target_workspace_id)
+
         # Step 2: Copy collections
         self._emit_progress("collections", "Copying collections...")
         await self._copy_collections(target_workspace_id, result)
@@ -139,6 +142,35 @@ class ProvisioningService:
             CreateWorkspaceRequest(name=self.target_workspace_name, type=self.workspace_type)
         )
         return {"success": result.success, "workspace": result.workspace, "is_new": True, "error": result.error}
+
+    @staticmethod
+    def _derive_company_name(workspace_name: str | None) -> str | None:
+        if not workspace_name:
+            return None
+        match = re.search(r'<>\s*(.+?)\s*Partner\s*Workspace', workspace_name, re.IGNORECASE)
+        return match.group(1).strip() if match else None
+
+    async def _copy_workspace_description(self, target_workspace_id: str) -> None:
+        try:
+            source_workspace = await self.client.get_workspace(self.source_workspace_id)
+            source_description = getattr(source_workspace, 'description', None) if source_workspace else None
+            if not source_description:
+                print("WARNING: Source workspace has no description — skipping description copy")
+                return
+            final_description = source_description
+            company_name = self._derive_company_name(self.target_workspace_name)
+            if company_name:
+                final_description = source_description.replace("<Company>", company_name)
+                print(f'Replaced <Company> placeholder with "{company_name}"')
+            else:
+                print("WARNING: Could not derive company name from target workspace name — copying description as-is")
+            update_result = await self.client.update_workspace(target_workspace_id, {"description": final_description})
+            if update_result.get("success"):
+                print("Workspace description updated successfully")
+            else:
+                print("WARNING: Failed to update workspace description — continuing provisioning")
+        except Exception as err:
+            print(f"WARNING: Unexpected error copying workspace description: {err} — continuing provisioning")
 
     async def _copy_collections(self, target_workspace_id: str, result: dict[str, Any]) -> None:
         source_collections = await self.client.get_collections(self.source_workspace_id)
