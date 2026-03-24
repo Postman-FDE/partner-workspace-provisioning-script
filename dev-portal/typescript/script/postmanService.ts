@@ -1914,14 +1914,21 @@ export const provisionWorkspace = async (
             }
             return v;
           });
+          for (const hv of hostVars) {
+            const envName = mockEnvVarMap.get(`${collUid}:${hv.varName}`);
+            if (envName && !updatedVars.some((v: any) => v.key === hv.varName)) {
+              updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
+            }
+          }
         } else {
           const mockEnvVarName = mockEnvVarMap.get(`${collUid}:__fallback__`);
           if (!mockEnvVarName) continue;
           const targetVar = existingVars.find((v: any) => COMMON_HOST_VAR_NAMES.includes(v.key));
-          if (!targetVar) continue;
-          updatedVars = existingVars.map((v: any) =>
-            v.key === targetVar.key ? { ...v, value: `{{${mockEnvVarName}}}` } : v
-          );
+          updatedVars = targetVar
+            ? existingVars.map((v: any) =>
+                v.key === targetVar.key ? { ...v, value: `{{${mockEnvVarName}}}` } : v
+              )
+            : [...existingVars, { key: 'baseUrl', value: `{{${mockEnvVarName}}}`, type: 'string' }];
         }
         const patchResult = await patchCollectionVariables(collUid, updatedVars);
         if (!patchResult.success) {
@@ -2468,14 +2475,21 @@ export const provisionCustomWorkspace = async (
                 }
                 return v;
               });
+              for (const hv of hostVars) {
+                const envName = customMockEnvVarMap.get(`${collUid}:${hv.varName}`);
+                if (envName && !updatedVars.some((v: any) => v.key === hv.varName)) {
+                  updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
+                }
+              }
             } else {
               const mockEnvVarName = customMockEnvVarMap.get(`${collUid}:__fallback__`);
               if (!mockEnvVarName) continue;
               const targetVar = existingVars.find((v: any) => COMMON_HOST_VAR_NAMES.includes(v.key));
-              if (!targetVar) continue;
-              updatedVars = existingVars.map((v: any) =>
-                v.key === targetVar.key ? { ...v, value: `{{${mockEnvVarName}}}` } : v
-              );
+              updatedVars = targetVar
+                ? existingVars.map((v: any) =>
+                    v.key === targetVar.key ? { ...v, value: `{{${mockEnvVarName}}}` } : v
+                  )
+                : [...existingVars, { key: 'baseUrl', value: `{{${mockEnvVarName}}}`, type: 'string' }];
             }
             const patchResult = await patchCollectionVariables(collUid, updatedVars);
             if (!patchResult.success) {

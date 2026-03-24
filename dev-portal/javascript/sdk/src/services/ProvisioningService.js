@@ -534,6 +534,12 @@ export class ProvisioningService {
           }
           return v;
         });
+        for (const hv of hostVars) {
+          const envName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
+          if (envName && !updatedVars.some(v => v.key === hv.varName)) {
+            updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
+          }
+        }
 
         await this.client.patchCollectionVariables(collData.targetUid, updatedVars);
         await this._delay(300);
@@ -546,14 +552,12 @@ export class ProvisioningService {
       const commonVar = existingVars.find(v =>
         COMMON_HOST_VAR_NAMES.some(n => n.toLowerCase() === v.key.toLowerCase())
       );
-      if (!commonVar) continue;
 
-      const updatedVars = existingVars.map(v => {
-        if (v.key === commonVar.key) {
-          return { ...v, value: `{{${fallbackEnvName}}}` };
-        }
-        return v;
-      });
+      const updatedVars = commonVar
+        ? existingVars.map(v =>
+            v.key === commonVar.key ? { ...v, value: `{{${fallbackEnvName}}}` } : v
+          )
+        : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvName}}}`, type: 'string' }];
 
       await this.client.patchCollectionVariables(collData.targetUid, updatedVars);
       await this._delay(300);

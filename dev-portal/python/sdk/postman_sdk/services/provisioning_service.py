@@ -267,24 +267,34 @@ class ProvisioningService:
             updated_vars = []
 
             if host_vars:
+                matched_keys: set[str] = set()
                 for v in existing_vars:
                     hv = next((h for h in host_vars if h.var_name == v.get('key')), None)
                     if hv:
                         env_name = mock_env_var_map.get(f"{coll_mapping.target_uid}:{hv.var_name}")
                         if env_name:
                             updated_vars.append({**v, 'value': f'{{{{{env_name}}}}}'})
+                            matched_keys.add(hv.var_name)
                             continue
                     updated_vars.append(v)
+                for hv in host_vars:
+                    env_name = mock_env_var_map.get(f"{coll_mapping.target_uid}:{hv.var_name}")
+                    if env_name and hv.var_name not in matched_keys:
+                        updated_vars.append({'key': hv.var_name, 'value': f'{{{{{env_name}}}}}', 'type': 'string'})
             else:
                 env_name = mock_env_var_map.get(f"{coll_mapping.target_uid}:__fallback__")
                 if not env_name:
                     continue
+                fallback_done = False
                 for v in existing_vars:
                     key = v.get('key')
                     if key and key.lower() in common_lower:
                         updated_vars.append({**v, 'value': f'{{{{{env_name}}}}}'})
+                        fallback_done = True
                     else:
                         updated_vars.append(v)
+                if not fallback_done:
+                    updated_vars.append({'key': 'baseUrl', 'value': f'{{{{{env_name}}}}}', 'type': 'string'})
 
             await self.client.patch_collection_variables(coll_mapping.target_uid, updated_vars)
 

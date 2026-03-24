@@ -749,6 +749,12 @@ const CollectionsHelper = {
           }
           return v;
         });
+        for (const hv of hostVars) {
+          const mockEnvVarName = mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`);
+          if (mockEnvVarName && !updatedVars.some(v => v.key === hv.varName)) {
+            updatedVars.push({ key: hv.varName, value: `{{${mockEnvVarName}}}`, type: 'string' });
+          }
+        }
 
         const patchResult = await CollectionsAPI.patchVariables(collData.targetUid, updatedVars);
         if (patchResult.success) {
@@ -775,24 +781,21 @@ const CollectionsHelper = {
           COMMON_HOST_VAR_NAMES.includes(v.key)
         );
 
-        if (matchedVar) {
-          const updatedVars = existingVars.map(v =>
-            v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
-          );
+        const updatedVars = matchedVar
+          ? existingVars.map(v =>
+              v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
+            )
+          : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvVarName}}}`, type: 'string' }];
 
-          const patchResult = await CollectionsAPI.patchVariables(collData.targetUid, updatedVars);
-          if (patchResult.success) {
-            results.success.push({ name: collData.name, variables: [fallbackEnvVarName] });
-            log.success(`Updated variables for: ${collData.name} (fallback)`);
-            log.detail(`${matchedVar.key} -> {{${fallbackEnvVarName}}}`);
-          } else {
-            results.failed.push({ name: collData.name, error: patchResult.error });
-            log.error(`Failed to update variables for "${collData.name}": ${patchResult.error}`);
-          }
+        const patchResult = await CollectionsAPI.patchVariables(collData.targetUid, updatedVars);
+        if (patchResult.success) {
+          const varName = matchedVar ? matchedVar.key : 'baseUrl';
+          results.success.push({ name: collData.name, variables: [fallbackEnvVarName] });
+          log.success(`Updated variables for: ${collData.name} (${matchedVar ? 'fallback' : 'created'})`);
+          log.detail(`${varName} -> {{${fallbackEnvVarName}}}`);
         } else {
-          results.warnings.push({ name: collData.name });
-          log.warn(`No host variable found in "${collData.name}" — mock env variable "${fallbackEnvVarName}" was created but collection variable was not updated`);
-          continue;
+          results.failed.push({ name: collData.name, error: patchResult.error });
+          log.error(`Failed to update variables for "${collData.name}": ${patchResult.error}`);
         }
       }
 

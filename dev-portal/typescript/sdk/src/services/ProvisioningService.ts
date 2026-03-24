@@ -417,6 +417,12 @@ export class ProvisioningService {
           }
           return v;
         });
+        for (const hv of hostVars) {
+          const envName = mockEnvVarMap.get(`${collMapping.targetUid}:${hv.varName}`);
+          if (envName && !updatedVars.some((v: any) => v.key === hv.varName)) {
+            updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
+          }
+        }
       } else {
         const envName = mockEnvVarMap.get(`${collMapping.targetUid}:__fallback__`);
         if (!envName) continue;
@@ -428,11 +434,12 @@ export class ProvisioningService {
             break;
           }
         }
-        if (!commonKey) continue;
 
-        updatedVars = existingVars.map((v: any) =>
-          v.key === commonKey ? { ...v, value: `{{${envName}}}` } : v
-        );
+        updatedVars = commonKey
+          ? existingVars.map((v: any) =>
+              v.key === commonKey ? { ...v, value: `{{${envName}}}` } : v
+            )
+          : [...existingVars, { key: 'baseUrl', value: `{{${envName}}}`, type: 'string' }];
       }
 
       await this.client.patchCollectionVariables(collMapping.targetUid, updatedVars);

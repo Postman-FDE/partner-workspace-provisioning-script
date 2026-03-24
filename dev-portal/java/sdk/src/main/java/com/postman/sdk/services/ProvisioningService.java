@@ -343,6 +343,7 @@ public class ProvisioningService {
                 List<Map<String, Object>> updatedVars = new ArrayList<>();
 
                 if (!hostVars.isEmpty()) {
+                    Set<String> matchedKeys = new HashSet<>();
                     for (Map<String, Object> v : existingVars) {
                         String key = String.valueOf(v.getOrDefault("key", ""));
                         Map<String, String> hv = hostVars.stream()
@@ -354,10 +355,18 @@ public class ProvisioningService {
                                 Map<String, Object> updated = new HashMap<>(v);
                                 updated.put("value", "{{" + envName + "}}");
                                 updatedVars.add(updated);
+                                matchedKeys.add(key);
                                 continue;
                             }
                         }
                         updatedVars.add(v);
+                    }
+                    for (Map<String, String> hv : hostVars) {
+                        String varName = hv.get("varName");
+                        String envName = ctx.mockEnvVarMap.get(targetUid + ":" + varName);
+                        if (envName != null && !matchedKeys.contains(varName)) {
+                            updatedVars.add(Map.of("key", varName, "value", "{{" + envName + "}}", "type", "string"));
+                        }
                     }
                 } else {
                     String fallbackEnvName = ctx.mockEnvVarMap.get(targetUid + ":__fallback__");
@@ -377,12 +386,8 @@ public class ProvisioningService {
                         }
                     }
                     if (!found) {
-                        return Mono.empty();
+                        updatedVars.add(Map.of("key", "baseUrl", "value", "{{" + fallbackEnvName + "}}", "type", "string"));
                     }
-                }
-
-                if (updatedVars.isEmpty()) {
-                    return Mono.empty();
                 }
 
                 return client.patchCollectionVariables(targetUid, updatedVars)

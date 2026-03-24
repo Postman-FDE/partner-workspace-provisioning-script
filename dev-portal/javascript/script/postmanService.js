@@ -1232,17 +1232,23 @@ export const provisionWorkspace = async (options, onProgress) => {
             }
             return v;
           });
+          for (const hv of hostVars) {
+            const envName = mockEnvVarMap.get(`${coll.uid}:${hv.varName}`);
+            if (envName && !updatedVars.some(v => v.key === hv.varName)) {
+              updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
+            }
+          }
           await patchCollectionVariables(coll.uid, updatedVars);
         } else {
           const fallbackEnvVarName = mockEnvVarMap.get(`${coll.uid}:__fallback__`);
           if (!fallbackEnvVarName) continue;
           const matchedVar = existingVars.find(v => COMMON_HOST_VAR_NAMES.includes(v.key));
-          if (matchedVar) {
-            const updatedVars = existingVars.map(v =>
-              v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
-            );
-            await patchCollectionVariables(coll.uid, updatedVars);
-          }
+          const updatedVars = matchedVar
+            ? existingVars.map(v =>
+                v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
+              )
+            : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvVarName}}}`, type: 'string' }];
+          await patchCollectionVariables(coll.uid, updatedVars);
         }
         await delay(300);
       }
@@ -1586,17 +1592,23 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
               }
               return v;
             });
+            for (const hv of hostVars) {
+              const envName = customMockEnvVarMap.get(`${coll.uid}:${hv.varName}`);
+              if (envName && !updatedVars.some(v => v.key === hv.varName)) {
+                updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
+              }
+            }
             await patchCollectionVariables(coll.uid, updatedVars);
           } else {
             const fallbackEnvVarName = customMockEnvVarMap.get(`${coll.uid}:__fallback__`);
             if (!fallbackEnvVarName) continue;
             const matchedVar = existingVars.find(v => COMMON_HOST_VAR_NAMES.includes(v.key));
-            if (matchedVar) {
-              const updatedVars = existingVars.map(v =>
-                v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
-              );
-              await patchCollectionVariables(coll.uid, updatedVars);
-            }
+            const updatedVars = matchedVar
+              ? existingVars.map(v =>
+                  v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
+                )
+              : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvVarName}}}`, type: 'string' }];
+            await patchCollectionVariables(coll.uid, updatedVars);
           }
           await delay(300);
         }

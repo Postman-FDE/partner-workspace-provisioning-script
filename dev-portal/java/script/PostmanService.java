@@ -1480,12 +1480,14 @@ public class PostmanService {
                                 @SuppressWarnings("unchecked")
                                 List<Map<String, Object>> existingVars = (List<Map<String, Object>>) collDetails.getOrDefault("variable", List.of());
                                 if (!hvList.isEmpty()) {
+                                    Set<String> matchedKeys = new HashSet<>();
                                     List<Map<String, Object>> updatedVars = existingVars.stream().map(v -> {
                                         String key = (String) v.get("key");
                                         for (Map<String, Object> hv : hvList) {
                                             if (hv.get("varName").equals(key)) {
                                                 String envName = mockEnvVarMap.get(coll.get("uid") + ":" + hv.get("varName"));
                                                 if (envName != null) {
+                                                    matchedKeys.add(key);
                                                     Map<String, Object> updated = new HashMap<>(v);
                                                     updated.put("value", "{{" + envName + "}}");
                                                     return updated;
@@ -1494,6 +1496,13 @@ public class PostmanService {
                                         }
                                         return v;
                                     }).collect(Collectors.toList());
+                                    for (Map<String, Object> hv : hvList) {
+                                        String varName = (String) hv.get("varName");
+                                        String envName = mockEnvVarMap.get(coll.get("uid") + ":" + varName);
+                                        if (envName != null && !matchedKeys.contains(varName)) {
+                                            updatedVars.add(Map.of("key", varName, "value", "{{" + envName + "}}", "type", "string"));
+                                        }
+                                    }
                                     return patchCollectionVariables((String) coll.get("uid"), updatedVars)
                                             .then(delay(300));
                                 }
@@ -1510,7 +1519,9 @@ public class PostmanService {
                                     }
                                     return v;
                                 }).collect(Collectors.toList());
-                                if (!matched[0]) return Mono.empty();
+                                if (!matched[0]) {
+                                    updatedVars.add(Map.of("key", "baseUrl", "value", "{{" + fallbackEnv + "}}", "type", "string"));
+                                }
                                 return patchCollectionVariables((String) coll.get("uid"), updatedVars)
                                         .then(delay(300));
                             })

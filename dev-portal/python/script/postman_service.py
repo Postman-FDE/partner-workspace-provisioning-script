@@ -1713,14 +1713,20 @@ async def provision_workspace(
                 existing_vars = coll["collection_details"].get("variable", [])
                 updated_vars: list[dict[str, Any]] = []
                 if host_vars:
+                    matched_keys: set[str] = set()
                     for v in existing_vars:
                         hv = next((h for h in host_vars if h["var_name"] == v.get("key")), None)
                         if hv:
                             env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
                             if env_name:
                                 updated_vars.append({**v, "value": f"{{{{{env_name}}}}}"})
+                                matched_keys.add(hv["var_name"])
                                 continue
                         updated_vars.append(v)
+                    for hv in host_vars:
+                        env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
+                        if env_name and hv["var_name"] not in matched_keys:
+                            updated_vars.append({"key": hv["var_name"], "value": f"{{{{{env_name}}}}}", "type": "string"})
                     await patch_collection_variables(coll["uid"], updated_vars)
                 else:
                     env_name = mock_env_var_map.get(f"{coll['uid']}:__fallback__")
@@ -1733,8 +1739,9 @@ async def provision_workspace(
                             fallback_done = True
                         else:
                             updated_vars.append(v)
-                    if fallback_done:
-                        await patch_collection_variables(coll["uid"], updated_vars)
+                    if not fallback_done:
+                        updated_vars.append({"key": "baseUrl", "value": f"{{{{{env_name}}}}}", "type": "string"})
+                    await patch_collection_variables(coll["uid"], updated_vars)
 
         # Step 6: Copy Specs
         if on_progress:
@@ -2233,14 +2240,20 @@ async def provision_custom_workspace(
                     existing_vars = coll["collection_details"].get("variable", [])
                     updated_vars: list[dict[str, Any]] = []
                     if host_vars:
+                        matched_keys: set[str] = set()
                         for v in existing_vars:
                             hv = next((h for h in host_vars if h["var_name"] == v.get("key")), None)
                             if hv:
                                 env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
                                 if env_name:
                                     updated_vars.append({**v, "value": f"{{{{{env_name}}}}}"})
+                                    matched_keys.add(hv["var_name"])
                                     continue
                             updated_vars.append(v)
+                        for hv in host_vars:
+                            env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
+                            if env_name and hv["var_name"] not in matched_keys:
+                                updated_vars.append({"key": hv["var_name"], "value": f"{{{{{env_name}}}}}", "type": "string"})
                         await patch_collection_variables(coll["uid"], updated_vars)
                     else:
                         env_name = mock_env_var_map.get(f"{coll['uid']}:__fallback__")
@@ -2253,8 +2266,9 @@ async def provision_custom_workspace(
                                 fallback_done = True
                             else:
                                 updated_vars.append(v)
-                        if fallback_done:
-                            await patch_collection_variables(coll["uid"], updated_vars)
+                        if not fallback_done:
+                            updated_vars.append({"key": "baseUrl", "value": f"{{{{{env_name}}}}}", "type": "string"})
+                        await patch_collection_variables(coll["uid"], updated_vars)
 
         if copy_specs:
             if on_progress:
