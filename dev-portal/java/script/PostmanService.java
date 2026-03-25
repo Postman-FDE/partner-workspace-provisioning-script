@@ -1181,6 +1181,12 @@ public class PostmanService {
         }
 
         return chain
+                .flatMap(result -> updateWorkspace(workspaceId, Map.of("description", ""))
+                        .onErrorResume(e -> {
+                            System.out.println("WARNING: Failed to clear workspace description: " + e.getMessage());
+                            return Mono.just(Map.of());
+                        })
+                        .thenReturn(result))
                 .doOnNext(result -> progress(onProgress, Map.of("phase", "complete", "message", "Reset complete", "result", result)))
                 .onErrorResume(e -> {
                     errors.add("Unexpected error: " + e.getMessage());

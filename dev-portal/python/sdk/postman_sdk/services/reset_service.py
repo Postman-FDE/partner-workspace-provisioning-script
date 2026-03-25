@@ -97,6 +97,12 @@ class ResetService:
         self._emit_progress("collections", f"Deleting {len(contents['collections'])} collection(s)...")
         await self._delete_collections(contents["collections"], result)
 
+        # Clear workspace description
+        try:
+            await self.client.update_workspace(self.workspace_id, {"description": ""})
+        except Exception as e:
+            print(f"WARNING: Failed to clear workspace description: {e}")
+
         self._emit_progress("complete", "Reset complete")
         return result
 

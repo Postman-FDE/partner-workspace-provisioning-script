@@ -1666,6 +1666,13 @@ export const resetWorkspace = async (
       }
     }
 
+    // Clear workspace description
+    try {
+      await updateWorkspace(workspaceId, { description: "" });
+    } catch (e: any) {
+      console.warn("Failed to clear workspace description:", e.message);
+    }
+
     onProgress?.({ phase: "complete", message: "Reset complete", result });
     return result;
   } catch (error) {
@@ -2829,6 +2836,13 @@ export const resetCustomWorkspace = async (
         });
         await delay(300);
       }
+    }
+
+    // Clear workspace description
+    try {
+      await updateWorkspace(workspaceId, { description: "" });
+    } catch (e: any) {
+      console.warn("Failed to clear workspace description:", e.message);
     }
 
     onProgress?.({ phase: "complete", message: "Custom reset complete", result });

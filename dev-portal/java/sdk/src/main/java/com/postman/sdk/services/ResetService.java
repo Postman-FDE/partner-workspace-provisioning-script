@@ -74,6 +74,12 @@ public class ResetService {
                     .then(deleteMocks(config, contents, result))
                     .then(deleteEnvironments(config, contents, result))
                     .then(deleteCollections(config, contents, result))
+                    .then(client.updateWorkspace(config.workspaceId(), java.util.Map.of("description", ""))
+                        .onErrorResume(e -> {
+                            System.out.println("WARNING: Failed to clear workspace description: " + e.getMessage());
+                            return Mono.just(java.util.Map.of());
+                        })
+                        .then())
                     .then(Mono.fromRunnable(() -> emitProgress(config, "complete", "Reset complete")))
                     .thenReturn(result);
             });

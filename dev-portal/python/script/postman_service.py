@@ -1482,6 +1482,12 @@ async def reset_workspace(
                     })
                 await asyncio.sleep(0.3)
 
+        # Clear workspace description
+        try:
+            await update_workspace(workspace_id, {"description": ""})
+        except Exception as desc_err:
+            print(f"WARNING: Failed to clear workspace description: {desc_err}")
+
         if on_progress:
             on_progress({"phase": "complete", "message": "Reset complete", "result": result})
         return result
@@ -2561,6 +2567,12 @@ async def reset_custom_workspace(
                         "currentItem": coll.get("name"),
                     })
                 await asyncio.sleep(0.3)
+
+        # Clear workspace description
+        try:
+            await update_workspace(workspace_id, {"description": ""})
+        except Exception as desc_err:
+            print(f"WARNING: Failed to clear workspace description: {desc_err}")
 
         if on_progress:
             on_progress({"phase": "complete", "message": "Custom reset complete", "result": result})

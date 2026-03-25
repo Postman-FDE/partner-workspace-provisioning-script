@@ -192,6 +192,16 @@ const WorkspaceAPI = {
       return null;
     }
   },
+
+  async updateWorkspace(workspaceId, updates) {
+    try {
+      const response = await api.put(`/workspaces/${workspaceId}`, { workspace: updates });
+      return { success: true, workspace: response.data.workspace };
+    } catch (error) {
+      logApiError('Update workspace', error, { workspaceId });
+      return { success: false };
+    }
+  },
 };
 
 // ============================================================================
@@ -715,6 +725,21 @@ async function runResetWorkflow() {
   const collectionResults = await CollectionsHelper.deleteAll();
   results.collections.deleted = collectionResults.deleted;
   results.collections.failed = collectionResults.failed;
+
+  // =========================================================================
+  // STEP 5: CLEAR WORKSPACE DESCRIPTION
+  // =========================================================================
+  log.step('Step 5: Clearing workspace description...');
+  try {
+    const updateResult = await WorkspaceAPI.updateWorkspace(runtimeConfig.workspaceId, { description: '' });
+    if (updateResult.success) {
+      log.success('Workspace description cleared');
+    } else {
+      log.warn('Failed to clear workspace description — continuing');
+    }
+  } catch (descError) {
+    log.warn(`Failed to clear workspace description: ${descError.message} — continuing`);
+  }
 
   // =========================================================================
   // SUMMARY
