@@ -434,14 +434,22 @@ All SDKs and scripts include automatic delays between API calls:
 
 ---
 
-## Original Source Reference
+## Reference Materials
 
-The original single-file implementation is preserved in [`postmanService.js`](postmanService.js) for reference and traceability. This file contains all the original API functions before they were modularized into the multi-language SDKs and standalone scripts.
+Original source files and API references are preserved in the [`reference/`](reference/) directory for traceability:
+
+| File | Description |
+|------|-------------|
+| [`postmanService.js`](reference/postmanService.js) | Original single-file implementation (before multi-language modularization) |
+| [`OG_README.md`](reference/OG_README.md) | Original README documenting the single-file approach |
+| [`postman-api.yaml`](reference/postman-api.yaml) | Postman API OpenAPI specification |
+| [`Postman API.postman_collection.json`](reference/Postman%20API.postman_collection.json) | Postman API collection |
+| [`PW Auto Provisioning.postman_collection.json`](reference/PW%20Auto%20Provisioning.postman_collection.json) | Auto-provisioning workflow collection |
 
 ### Relationship to Dev Portal
 
 ```
-postmanService.js (original)
+reference/postmanService.js (original)
     │
     ├── dev-portal/javascript/
     │     ├── script/    (cleaned-up single-file JS)
@@ -482,10 +490,12 @@ fde-pw-creation-script/
 │   └── java/
 │       ├── script/                   # Drag-and-drop standalone script
 │       └── sdk/                      # Modular Java SDK
-├── postmanService.js                 # Original source (preserved)
-├── provision.js                      # Root provision entry point
-├── reset.js                          # Root reset entry point
-├── update.js                         # Root update entry point
+├── reference/                        # Original source & API references
+│   ├── postmanService.js             # Original single-file implementation
+│   ├── OG_README.md                  # Original README
+│   ├── postman-api.yaml              # Postman API OpenAPI spec
+│   ├── Postman API.postman_collection.json
+│   └── PW Auto Provisioning.postman_collection.json
 ├── package.json                      # Root package config
 └── README.md                         # This file
 ```
