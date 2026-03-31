@@ -47,3 +47,25 @@ export {
   type UpdateConfig,
   type UpdateResult,
 } from './services';
+
+import { PostmanClient } from './client';
+
+/**
+ * Create a configured PostmanClient from environment
+ */
+function createClient(env: Record<string, string | undefined> = process.env): PostmanClient {
+  const apiKey = env.POSTMAN_API_KEY;
+  if (!apiKey) {
+    throw new Error('POSTMAN_API_KEY environment variable is required');
+  }
+  return new PostmanClient({ apiKey });
+}
+
+/**
+ * Scan workspaces and return a diff of new assets without making changes (convenience function)
+ */
+export async function scanWorkspace(options: { sourceWorkspaceId: string; targetWorkspaceId: string }) {
+  const client = createClient();
+  const service = new UpdateService(client);
+  return service.scan(options);
+}

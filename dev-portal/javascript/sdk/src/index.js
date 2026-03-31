@@ -313,3 +313,16 @@ export async function updateWorkspace(options, onProgress) {
   const service = new UpdateService(client);
   return service.update(options, onProgress);
 }
+
+/**
+ * Scan workspaces and return a diff of new assets without making changes (convenience function)
+ * @param {Object} options
+ * @param {string} options.sourceWorkspaceId
+ * @param {string} options.targetWorkspaceId
+ * @returns {Promise<Object>}
+ */
+export async function scanWorkspace(options) {
+  const client = createClient();
+  const service = new UpdateService(client);
+  return service.scan(options);
+}

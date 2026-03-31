@@ -104,13 +104,18 @@ export class UpdateService {
         sourceWorkspaceId, targetWorkspaceId
       );
 
-      if (newCollections.length === 0 && newSpecs.length === 0 && newEnvironments.length === 0) {
+      // Auto-link specs to new collection names
+      const normalize = (name: string | undefined | null): string => (name || '').toLowerCase().trim();
+      const newCollectionNames = new Set(newCollections.map(c => normalize(c.name)));
+      const linkedSpecs = newSpecs.filter(s => newCollectionNames.has(normalize(s.name)));
+
+      if (newCollections.length === 0 && linkedSpecs.length === 0 && newEnvironments.length === 0) {
         this.emitProgress(onProgress, 'complete', 'Workspace is up to date — no new assets found.', 100);
         return result;
       }
 
       this.emitProgress(onProgress, 'detection',
-        `Found ${newCollections.length} new collection(s), ${newSpecs.length} new spec(s), ${newEnvironments.length} new environment(s)`,
+        `Found ${newCollections.length} new collection(s), ${linkedSpecs.length} new spec(s), ${newEnvironments.length} new environment(s)`,
         20
       );
 
@@ -136,9 +141,9 @@ export class UpdateService {
       }
 
       // Phase 6: Copy new specs
-      if (newSpecs.length > 0) {
+      if (linkedSpecs.length > 0) {
         this.emitProgress(onProgress, 'specs', 'Copying new API specs...', 75);
-        await this.copyNewSpecs(newSpecs, targetWorkspaceId, result, onProgress);
+        await this.copyNewSpecs(linkedSpecs, targetWorkspaceId, result, onProgress);
       }
 
       // Phase 7: Copy new environments
@@ -156,6 +161,37 @@ export class UpdateService {
     }
 
     return result;
+  }
+
+  /**
+   * Scan workspaces and return a diff of new assets without making changes.
+   * Specs are auto-linked to new collections by name.
+   */
+  async scan(options: UpdateConfig): Promise<{
+    newCollections: Array<{ id: string; uid: string; name: string }>;
+    newSpecs: Array<{ id: string; name: string; type: string }>;
+    newEnvironments: Array<{ id: string; uid: string; name: string }>;
+    isUpToDate: boolean;
+  }> {
+    const { sourceWorkspaceId, targetWorkspaceId } = options;
+
+    const validation = await this.client.validateApiKey();
+    if (!validation.valid) throw new Error(`Invalid API key: ${validation.error}`);
+
+    const { newCollections, newSpecs, newEnvironments } = await this.detectNewAssets(
+      sourceWorkspaceId, targetWorkspaceId
+    );
+
+    const normalize = (name: string | undefined | null): string => (name || '').toLowerCase().trim();
+    const newCollectionNames = new Set(newCollections.map(c => normalize(c.name)));
+    const linkedSpecs = newSpecs.filter(s => newCollectionNames.has(normalize(s.name)));
+
+    return {
+      newCollections: newCollections.map(c => ({ id: c.id, uid: c.uid, name: c.name })),
+      newSpecs: linkedSpecs.map(s => ({ id: s.id, name: s.name, type: s.type })),
+      newEnvironments: newEnvironments.map(e => ({ id: e.id, uid: e.uid, name: e.name })),
+      isUpToDate: newCollections.length === 0 && linkedSpecs.length === 0 && newEnvironments.length === 0,
+    };
   }
 
   // ==================== Detection ====================

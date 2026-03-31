@@ -485,9 +485,17 @@ export class ProvisioningService {
 
   private async copySpecs(targetWorkspaceId: string, result: ProvisioningResult): Promise<void> {
     const sourceSpecs = await this.client.getSpecs(this.config.sourceWorkspaceId);
-    result.specs.total = sourceSpecs.length;
+    const normalize = (name: string | undefined | null): string => (name || '').toLowerCase().trim();
 
-    for (const spec of sourceSpecs) {
+    // Only copy specs that match a copied collection name
+    const copiedCollectionNames = new Set(
+      Array.from(this.collectionMappings.values()).map(c => normalize(c.name))
+    );
+    const matchingSpecs = sourceSpecs.filter(s => copiedCollectionNames.has(normalize(s.name)));
+
+    result.specs.total = matchingSpecs.length;
+
+    for (const spec of matchingSpecs) {
       const copyResult = await this.copySpec(spec, targetWorkspaceId);
 
       if (copyResult.success && copyResult.targetId) {
