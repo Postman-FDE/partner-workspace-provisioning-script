@@ -65,8 +65,13 @@ class UpdateService:
                 source_workspace_id, target_workspace_id
             )
 
+            # Auto-link: only include specs whose name matches a new collection
+            normalize = lambda name: (name or "").lower().strip()
+            new_collection_names = {normalize(c.name) for c in new_collections}
+            linked_specs = [s for s in new_specs if normalize(s.name) in new_collection_names]
+
             # Check if workspace is up to date
-            if not new_collections and not new_specs and not new_environments:
+            if not new_collections and not linked_specs and not new_environments:
                 self._emit_progress(
                     on_progress, "complete",
                     "Workspace is up to date — no new assets found.", 100,
@@ -76,7 +81,7 @@ class UpdateService:
             self._emit_progress(
                 on_progress, "detection",
                 f"Found {len(new_collections)} new collection(s), "
-                f"{len(new_specs)} new spec(s), "
+                f"{len(linked_specs)} new spec(s), "
                 f"{len(new_environments)} new environment(s)",
                 20,
             )
@@ -103,10 +108,10 @@ class UpdateService:
                 # Phase 5b: Update new collection variables
                 await self._update_collection_variables(store, mock_env_var_map)
 
-            # Phase 6: Copy new specs
-            if new_specs:
+            # Phase 6: Copy new specs (only those linked to new collections)
+            if linked_specs:
                 self._emit_progress(on_progress, "specs", "Copying new API specs...", 75)
-                await self._copy_new_specs(new_specs, target_workspace_id, result, on_progress)
+                await self._copy_new_specs(linked_specs, target_workspace_id, result, on_progress)
 
             # Phase 7: Copy new environments
             if new_environments:
@@ -122,6 +127,31 @@ class UpdateService:
             self._emit_progress(on_progress, "error", f"Error: {e}", -1)
 
         return result
+
+    async def scan(
+        self,
+        source_workspace_id: str,
+        target_workspace_id: str,
+    ) -> dict[str, Any]:
+        """Scan workspaces and return a diff of new assets without making changes."""
+        validation = await self.client.validate_api_key()
+        if not validation.get("valid"):
+            raise Exception(f"Invalid API key: {validation.get('error')}")
+
+        new_collections, new_specs, new_environments = await self._detect_new_assets(
+            source_workspace_id, target_workspace_id
+        )
+
+        normalize = lambda name: (name or "").lower().strip()
+        new_collection_names = {normalize(c.name) for c in new_collections}
+        linked_specs = [s for s in new_specs if normalize(s.name) in new_collection_names]
+
+        return {
+            "new_collections": [{"name": c.name, "uid": c.uid} for c in new_collections],
+            "new_specs": [{"name": s.name, "id": s.id, "type": s.type} for s in linked_specs],
+            "new_environments": [{"name": e.name, "uid": e.uid} for e in new_environments],
+            "is_up_to_date": len(new_collections) == 0 and len(linked_specs) == 0 and len(new_environments) == 0,
+        }
 
     # ==================== Detection ====================
 

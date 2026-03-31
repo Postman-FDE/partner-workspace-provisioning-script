@@ -94,14 +94,22 @@ public class UpdateService {
         return client.validateApiKey()
                 .flatMap(user -> detectNewAssets(ctx))
                 .flatMap(detected -> {
-                    if (detected.newCollections().isEmpty() && detected.newSpecs().isEmpty() && detected.newEnvironments().isEmpty()) {
+                    // Auto-link: only include specs whose name matches a new collection
+                    Set<String> newCollectionNames = detected.newCollections().stream()
+                            .map(c -> c.name() != null ? c.name().toLowerCase().trim() : "")
+                            .collect(Collectors.toSet());
+                    List<Spec> linkedSpecs = detected.newSpecs().stream()
+                            .filter(s -> newCollectionNames.contains(s.name() != null ? s.name().toLowerCase().trim() : ""))
+                            .toList();
+
+                    if (detected.newCollections().isEmpty() && linkedSpecs.isEmpty() && detected.newEnvironments().isEmpty()) {
                         emitProgress(ctx, "complete", "Workspace is up to date — no new assets found.");
                         return Mono.just(ctx.buildResult());
                     }
 
                     emitProgress(ctx, "detection",
                             String.format("Found %d new collection(s), %d new spec(s), %d new environment(s)",
-                                    detected.newCollections().size(), detected.newSpecs().size(), detected.newEnvironments().size()));
+                                    detected.newCollections().size(), linkedSpecs.size(), detected.newEnvironments().size()));
 
                     Mono<Void> pipeline = Mono.empty();
 
@@ -112,8 +120,8 @@ public class UpdateService {
                                 .then(updateCollectionVariables(ctx));
                     }
 
-                    if (!detected.newSpecs().isEmpty()) {
-                        pipeline = pipeline.then(copyNewSpecs(ctx, detected.newSpecs()));
+                    if (!linkedSpecs.isEmpty()) {
+                        pipeline = pipeline.then(copyNewSpecs(ctx, linkedSpecs));
                     }
 
                     if (!detected.newEnvironments().isEmpty()) {
@@ -123,6 +131,45 @@ public class UpdateService {
                     return pipeline.then(Mono.fromCallable(ctx::buildResult));
                 });
     }
+
+    /**
+     * Scan workspaces and return a diff of new assets without making changes.
+     */
+    public Mono<ScanResult> scan(UpdateConfig config) {
+        UpdateContext ctx = new UpdateContext(config);
+
+        return client.validateApiKey()
+                .flatMap(user -> detectNewAssets(ctx))
+                .map(detected -> {
+                    Set<String> newCollectionNames = detected.newCollections().stream()
+                            .map(c -> c.name() != null ? c.name().toLowerCase().trim() : "")
+                            .collect(Collectors.toSet());
+                    List<Spec> linkedSpecs = detected.newSpecs().stream()
+                            .filter(s -> newCollectionNames.contains(s.name() != null ? s.name().toLowerCase().trim() : ""))
+                            .toList();
+
+                    List<Map<String, String>> collectionSummaries = detected.newCollections().stream()
+                            .map(c -> Map.of("name", c.name(), "uid", c.uid()))
+                            .toList();
+                    List<Map<String, String>> specSummaries = linkedSpecs.stream()
+                            .map(s -> Map.of("name", s.name(), "id", s.id(), "type", s.type().getValue()))
+                            .toList();
+                    List<Map<String, String>> envSummaries = detected.newEnvironments().stream()
+                            .map(e -> Map.of("name", e.name(), "uid", e.uid()))
+                            .toList();
+
+                    boolean isUpToDate = collectionSummaries.isEmpty() && specSummaries.isEmpty() && envSummaries.isEmpty();
+
+                    return new ScanResult(collectionSummaries, specSummaries, envSummaries, isUpToDate);
+                });
+    }
+
+    public record ScanResult(
+            List<Map<String, String>> newCollections,
+            List<Map<String, String>> newSpecs,
+            List<Map<String, String>> newEnvironments,
+            boolean isUpToDate
+    ) {}
 
     // ==================== Detection ====================
 

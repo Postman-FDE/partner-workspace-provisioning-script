@@ -12,6 +12,7 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Service for workspace provisioning workflow
@@ -438,17 +439,36 @@ public class ProvisioningService {
 
     private Mono<Void> copySpecs(ProvisioningContext ctx) {
         ctx.emitProgress("specs", "Copying specs...");
-        
-        return specService.copyAllSpecs(ctx.config.sourceWorkspaceId(), ctx.targetWorkspaceId)
-            .map(result -> {
-                ctx.result.specs.total = result.success().size() + result.failed().size();
-                ctx.result.specs.success = result.success().size();
-                for (SpecService.CopyAllSpecsResult.FailedItem item : result.failed()) {
-                    ctx.result.specs.failed.add(Map.of("name", item.name(), "error", item.error()));
+
+        // Auto-link: only copy specs whose name matches a copied collection
+        Set<String> copiedCollectionNames = ctx.collectionMappings.values().stream()
+                .map(m -> m.name() != null ? m.name().toLowerCase().trim() : "")
+                .collect(Collectors.toSet());
+
+        return client.getSpecs(ctx.config.sourceWorkspaceId())
+            .flatMap(specs -> {
+                List<Spec> matchingSpecs = specs.stream()
+                        .filter(s -> copiedCollectionNames.contains(s.name() != null ? s.name().toLowerCase().trim() : ""))
+                        .toList();
+
+                ctx.result.specs.total = matchingSpecs.size();
+
+                if (matchingSpecs.isEmpty()) {
+                    return Mono.empty();
                 }
-                return result;
-            })
-            .then();
+
+                return Flux.fromIterable(matchingSpecs)
+                    .delayElements(Duration.ofMillis(500))
+                    .flatMap(spec -> specService.copySpec(spec.id(), spec.name(), spec.type(), ctx.targetWorkspaceId)
+                        .doOnNext(result -> {
+                            if (result.success()) {
+                                ctx.result.specs.success++;
+                            } else {
+                                ctx.result.specs.failed.add(Map.of("name", spec.name(), "error", String.join("; ", result.errors())));
+                            }
+                        }))
+                    .then();
+            });
     }
 
     private Mono<Void> addAdmins(ProvisioningContext ctx) {
