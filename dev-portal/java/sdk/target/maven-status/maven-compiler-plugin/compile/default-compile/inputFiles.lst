@@ -12,6 +12,7 @@
 /Users/austin.rowland@postman.com/Documents/Customers/partner-workspaces/fde-partner-workspace-provisioning/dev-portal/java/sdk/src/main/java/com/postman/sdk/services/ProvisioningService.java
 /Users/austin.rowland@postman.com/Documents/Customers/partner-workspaces/fde-partner-workspace-provisioning/dev-portal/java/sdk/src/main/java/com/postman/sdk/types/Collection.java
 /Users/austin.rowland@postman.com/Documents/Customers/partner-workspaces/fde-partner-workspace-provisioning/dev-portal/java/sdk/src/main/java/com/postman/sdk/services/ResetService.java
+/Users/austin.rowland@postman.com/Documents/Customers/partner-workspaces/fde-partner-workspace-provisioning/dev-portal/java/sdk/src/main/java/com/postman/sdk/services/UpdateService.java
 /Users/austin.rowland@postman.com/Documents/Customers/partner-workspaces/fde-partner-workspace-provisioning/dev-portal/java/sdk/src/main/java/com/postman/sdk/types/ApiResponse.java
 /Users/austin.rowland@postman.com/Documents/Customers/partner-workspaces/fde-partner-workspace-provisioning/dev-portal/java/sdk/src/main/java/com/postman/sdk/client/PostmanApiException.java
 /Users/austin.rowland@postman.com/Documents/Customers/partner-workspaces/fde-partner-workspace-provisioning/dev-portal/java/sdk/src/main/java/com/postman/sdk/types/WorkspaceRole.java
