@@ -453,16 +453,36 @@ async function main() {
   // Detect
   const { newCollections, newSpecs, newEnvironments, targetEnvs } = await detectNewAssets(sourceId, targetId);
 
-  if (newCollections.length === 0 && newSpecs.length === 0 && newEnvironments.length === 0) {
+  // Auto-link specs to collections: only copy specs whose names match a new collection
+  const normalize = (name) => (name || '').toLowerCase().trim();
+  const newCollectionNames = new Set(newCollections.map(c => normalize(c.name)));
+  const linkedSpecs = newSpecs.filter(s => newCollectionNames.has(normalize(s.name)));
+
+  if (newCollections.length === 0 && linkedSpecs.length === 0 && newEnvironments.length === 0) {
     log.success('Workspace is up to date \u2014 no new assets found.');
     process.exit(0);
+  }
+
+  // Show diff of detected changes
+  log.section('CHANGES DETECTED');
+  if (newCollections.length > 0) {
+    log.info(`New Collections (${newCollections.length}):`);
+    newCollections.forEach(c => log.info(`  \u2022 ${c.name}`));
+  }
+  if (linkedSpecs.length > 0) {
+    log.info(`New API Specs (${linkedSpecs.length}):`);
+    linkedSpecs.forEach(s => log.info(`  \u2022 ${s.name}`));
+  }
+  if (newEnvironments.length > 0) {
+    log.info(`New Environments (${newEnvironments.length}):`);
+    newEnvironments.forEach(e => log.info(`  \u2022 ${e.name}`));
   }
 
   // Confirm unless --confirm flag is present
   if (!hasFlag('--confirm')) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise(resolve => rl.question(
-      `\nProceed with adding ${newCollections.length} collection(s), ${newSpecs.length} spec(s), ${newEnvironments.length} environment(s)? (y/n) `,
+      `\nProceed with adding ${newCollections.length} collection(s), ${linkedSpecs.length} spec(s), ${newEnvironments.length} environment(s)? (y/n) `,
       resolve
     ));
     rl.close();
@@ -474,14 +494,14 @@ async function main() {
   const mockEnvVarMap = await updateMockEnv(targetId, store, targetEnvs);
   await updateCollectionVariables(store, mockEnvVarMap);
 
-  if (newSpecs.length > 0) await copyNewSpecs(newSpecs, targetId);
+  if (linkedSpecs.length > 0) await copyNewSpecs(linkedSpecs, targetId);
   if (newEnvironments.length > 0) await copyNewEnvironments(newEnvironments, targetId);
 
   // Summary
   log.section('UPDATE COMPLETE');
   log.success(`Collections added: ${store.collections.size}`);
   log.success(`Mocks created: ${store.mocks.size}`);
-  log.success(`Specs copied: ${newSpecs.length}`);
+  log.success(`Specs copied: ${linkedSpecs.length}`);
   log.success(`Environments copied: ${newEnvironments.length}`);
 }
 

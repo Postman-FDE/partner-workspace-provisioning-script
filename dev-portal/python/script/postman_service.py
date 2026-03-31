@@ -1796,19 +1796,23 @@ async def provision_workspace(
                         updated_vars.append({"key": "baseUrl", "value": f"{{{{{env_name}}}}}", "type": "string"})
                     await patch_collection_variables(coll["uid"], updated_vars)
 
-        # Step 6: Copy Specs
+        # Step 6: Copy Specs (auto-linked to collections by name)
         if on_progress:
             on_progress({"phase": "specs", "message": "Copying specs...", "progress": 80})
         source_specs = await get_all_specs(source_workspace_id)
-        results["specs"]["total"] = len(source_specs)
-        for i, spec in enumerate(source_specs):
+        # Auto-link: only copy specs whose names match a copied collection
+        norm = lambda name: (name or "").lower().strip()
+        copied_coll_names = {norm(c["name"]) for c in results["collections"]["success_data"]}
+        linked_specs = [s for s in source_specs if norm(s.get("name")) in copied_coll_names]
+        results["specs"]["total"] = len(linked_specs)
+        for i, spec in enumerate(linked_specs):
             if on_progress:
                 on_progress({
                     "phase": "specs",
                     "message": f"Copying: {spec.get('name')}",
                     "current": i + 1,
-                    "total": len(source_specs),
-                    "progress": 80 + int((i / len(source_specs)) * 15),
+                    "total": len(linked_specs),
+                    "progress": 80 + int((i / len(linked_specs)) * 15) if linked_specs else 80,
                 })
             copy_result = await copy_spec(
                 spec["id"], spec["name"], spec["type"], workspace_id
@@ -1986,14 +1990,18 @@ async def update_workspace_assets(
             if e.get("name") != "Mock Env" and normalize(e.get("name")) not in target_env_names
         ]
 
+        # Auto-link specs to collections: only copy specs whose names match a new collection
+        new_collection_names = {normalize(c.get("name")) for c in new_collections}
+        linked_specs = [s for s in new_specs if normalize(s.get("name")) in new_collection_names]
+
         if on_progress:
             on_progress({
                 "phase": "detection",
-                "message": f"Found {len(new_collections)} new collection(s), {len(new_specs)} new spec(s), {len(new_environments)} new environment(s)",
+                "message": f"Found {len(new_collections)} new collection(s), {len(linked_specs)} new spec(s), {len(new_environments)} new environment(s)",
                 "progress": 15,
             })
 
-        if not new_collections and not new_specs and not new_environments:
+        if not new_collections and not linked_specs and not new_environments:
             if on_progress:
                 on_progress({"phase": "complete", "message": "Workspace is up to date — no new assets found.", "progress": 100, "results": results})
             return results
@@ -2169,19 +2177,19 @@ async def update_workspace_assets(
                     await patch_collection_variables(coll["uid"], updated_vars)
                 await asyncio.sleep(0.3)
 
-        # Step 6: Copy new specs
-        if new_specs:
+        # Step 6: Copy new specs (auto-linked to collections)
+        if linked_specs:
             if on_progress:
                 on_progress({"phase": "specs", "message": "Copying new specs...", "progress": 80})
-            results["specs"]["total"] = len(new_specs)
-            for i, spec in enumerate(new_specs):
+            results["specs"]["total"] = len(linked_specs)
+            for i, spec in enumerate(linked_specs):
                 if on_progress:
                     on_progress({
                         "phase": "specs",
                         "message": f"Copying: {spec.get('name')}",
                         "current": i + 1,
-                        "total": len(new_specs),
-                        "progress": 80 + int((i / len(new_specs)) * 10),
+                        "total": len(linked_specs),
+                        "progress": 80 + int((i / len(linked_specs)) * 10),
                     })
                 copy_result = await copy_spec(spec["id"], spec["name"], spec["type"], target_workspace_id)
                 if copy_result.success:
@@ -2235,6 +2243,74 @@ async def update_workspace_assets(
         if on_progress:
             on_progress({"phase": "error", "message": f"Error: {e}", "progress": 0, "results": results})
         raise
+
+
+async def scan_workspace_assets(
+    source_workspace_id: str,
+    target_workspace_id: str,
+) -> dict[str, Any]:
+    """
+    Scan source and target workspaces for new assets without making changes.
+    Returns the diff of what would be added, with specs auto-linked to collections.
+    """
+    if not _get_api_key():
+        raise ValueError("Postman API key not configured")
+    if not source_workspace_id:
+        raise ValueError("Source workspace ID is required")
+    if not target_workspace_id:
+        raise ValueError("Target workspace ID is required")
+
+    source_colls = await get_all_collections(source_workspace_id)
+    target_colls = await get_all_collections(target_workspace_id)
+    source_specs = await get_all_specs(source_workspace_id)
+    target_specs = await get_all_specs(target_workspace_id)
+    source_envs = await get_all_environments(source_workspace_id)
+    target_envs = await get_all_environments(target_workspace_id)
+
+    # Collections: fork check + name fallback
+    target_fork_sources: set[str] = set()
+    target_names: set[str] = set()
+    for tc in target_colls:
+        target_names.add(tc.get("name", ""))
+        try:
+            details = await get_collection_details(tc["uid"])
+            if details:
+                fork_from = (details.get("fork") or {}).get("from")
+                if fork_from:
+                    target_fork_sources.add(fork_from)
+        except Exception:
+            pass
+        await asyncio.sleep(0.3)
+
+    new_collections = [
+        sc for sc in source_colls
+        if sc.get("uid") not in target_fork_sources and sc.get("name") not in target_names
+    ]
+
+    # Specs: name match
+    normalize = lambda name: (name or "").lower().strip()
+    target_spec_names = {normalize(s.get("name")) for s in target_specs}
+    new_specs = [s for s in source_specs if normalize(s.get("name")) not in target_spec_names]
+
+    # Auto-link specs to collections
+    new_collection_names = {normalize(c.get("name")) for c in new_collections}
+    linked_specs = [s for s in new_specs if normalize(s.get("name")) in new_collection_names]
+
+    # Environments: name match, exclude Mock Env
+    target_env_names = {normalize(e.get("name")) for e in target_envs}
+    new_environments = [
+        e for e in source_envs
+        if e.get("name") != "Mock Env" and normalize(e.get("name")) not in target_env_names
+    ]
+
+    is_up_to_date = len(new_collections) == 0 and len(linked_specs) == 0 and len(new_environments) == 0
+
+    return {
+        "new_collections": new_collections,
+        "new_specs": linked_specs,
+        "new_environments": new_environments,
+        "is_up_to_date": is_up_to_date,
+    }
 
 
 # ============================================================================
@@ -2679,6 +2755,10 @@ async def provision_custom_workspace(
             src_specs = await get_all_specs(source_workspace_id)
             if selected_spec_ids:
                 src_specs = [s for s in src_specs if s.get("id") in selected_spec_ids]
+            # Auto-link: only copy specs whose names match a copied collection
+            _norm = lambda name: (name or "").lower().strip()
+            _copied_coll_names = {_norm(c["name"]) for c in results["collections"]["success_data"]}
+            src_specs = [s for s in src_specs if _norm(s.get("name")) in _copied_coll_names]
             results["specs"]["total"] = len(src_specs)
             for i, spec in enumerate(src_specs):
                 if on_progress:

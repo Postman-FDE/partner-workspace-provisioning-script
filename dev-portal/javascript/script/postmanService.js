@@ -1312,13 +1312,16 @@ export const provisionWorkspace = async (options, onProgress) => {
       }
     }
 
-    // Step 6: Copy Specs
+    // Step 6: Copy Specs (auto-linked to collections by name)
     onProgress?.({ phase: "specs", message: "Copying specs...", progress: 80 });
     const sourceSpecs = await getAllSpecs(sourceWorkspaceId);
-    results.specs.total = sourceSpecs.length;
-    for (let i = 0; i < sourceSpecs.length; i++) {
-      const spec = sourceSpecs[i];
-      onProgress?.({ phase: "specs", message: `Copying: ${spec.name}`, current: i + 1, total: sourceSpecs.length, progress: 80 + (i / sourceSpecs.length) * 15 });
+    const normalizeSpec = (name) => (name || '').toLowerCase().trim();
+    const copiedCollNames = new Set(results.collections.successData.map(c => normalizeSpec(c.name)));
+    const linkedSpecs = sourceSpecs.filter(s => copiedCollNames.has(normalizeSpec(s.name)));
+    results.specs.total = linkedSpecs.length;
+    for (let i = 0; i < linkedSpecs.length; i++) {
+      const spec = linkedSpecs[i];
+      onProgress?.({ phase: "specs", message: `Copying: ${spec.name}`, current: i + 1, total: linkedSpecs.length, progress: 80 + (i / linkedSpecs.length) * 15 });
       const copyResult = await copySpec(spec.id, spec.name, spec.type, workspaceId);
       if (copyResult.success) {
         results.specs.success++;
@@ -1448,9 +1451,13 @@ export const updateWorkspaceAssets = async ({ sourceWorkspaceId, targetWorkspace
     const targetEnvNames = new Set(targetEnvs.map(e => normalize(e.name)));
     const newEnvironments = sourceEnvs.filter(e => normalize(e.name) !== 'mock env' && !targetEnvNames.has(normalize(e.name)));
 
-    onProgress?.({ phase: "detection", message: `Found ${newCollections.length} new collection(s), ${newSpecs.length} new spec(s), ${newEnvironments.length} new environment(s)`, progress: 15 });
+    // Auto-link specs to collections: only copy specs whose names match a new collection
+    const newCollectionNames = new Set(newCollections.map(c => normalize(c.name)));
+    const linkedSpecs = newSpecs.filter(s => newCollectionNames.has(normalize(s.name)));
 
-    if (newCollections.length === 0 && newSpecs.length === 0 && newEnvironments.length === 0) {
+    onProgress?.({ phase: "detection", message: `Found ${newCollections.length} new collection(s), ${linkedSpecs.length} new spec(s), ${newEnvironments.length} new environment(s)`, progress: 15 });
+
+    if (newCollections.length === 0 && linkedSpecs.length === 0 && newEnvironments.length === 0) {
       onProgress?.({ phase: "complete", message: "Workspace is up to date — no new assets found.", progress: 100, results });
       return results;
     }
@@ -1604,13 +1611,13 @@ export const updateWorkspaceAssets = async ({ sourceWorkspaceId, targetWorkspace
       }
     }
 
-    // Step 6: Copy new specs
-    if (newSpecs.length > 0) {
+    // Step 6: Copy new specs (auto-linked to collections)
+    if (linkedSpecs.length > 0) {
       onProgress?.({ phase: "specs", message: "Copying new specs...", progress: 80 });
-      results.specs.total = newSpecs.length;
-      for (let i = 0; i < newSpecs.length; i++) {
-        const spec = newSpecs[i];
-        onProgress?.({ phase: "specs", message: `Copying: ${spec.name}`, current: i + 1, total: newSpecs.length, progress: 80 + (i / newSpecs.length) * 10 });
+      results.specs.total = linkedSpecs.length;
+      for (let i = 0; i < linkedSpecs.length; i++) {
+        const spec = linkedSpecs[i];
+        onProgress?.({ phase: "specs", message: `Copying: ${spec.name}`, current: i + 1, total: linkedSpecs.length, progress: 80 + (i / linkedSpecs.length) * 10 });
         const copyResult = await copySpec(spec.id, spec.name, spec.type, targetWorkspaceId);
         if (copyResult.success) {
           results.specs.success++;
@@ -1654,6 +1661,58 @@ export const updateWorkspaceAssets = async ({ sourceWorkspaceId, targetWorkspace
     onProgress?.({ phase: "error", message: `Error: ${error.message}`, progress: 0, results });
     throw error;
   }
+};
+
+/**
+ * Scan source and target workspaces for new assets without making changes.
+ * Returns the diff of what would be added, with specs auto-linked to collections.
+ * @param {object} options - { sourceWorkspaceId, targetWorkspaceId }
+ * @returns {Promise<object>} { newCollections, newSpecs, newEnvironments, isUpToDate }
+ */
+export const scanWorkspaceAssets = async ({ sourceWorkspaceId, targetWorkspaceId }) => {
+  if (!POSTMAN_API_KEY) throw new Error("Postman API key not configured");
+  if (!sourceWorkspaceId) throw new Error("Source workspace ID is required");
+  if (!targetWorkspaceId) throw new Error("Target workspace ID is required");
+
+  const [sourceColls, targetColls, sourceSpecs, targetSpecs, sourceEnvs, targetEnvs] = await Promise.all([
+    getAllCollections(sourceWorkspaceId),
+    getAllCollections(targetWorkspaceId),
+    getAllSpecs(sourceWorkspaceId),
+    getAllSpecs(targetWorkspaceId),
+    getAllEnvironments(sourceWorkspaceId),
+    getAllEnvironments(targetWorkspaceId),
+  ]);
+
+  // Collections: fork check + name fallback
+  const targetForkSources = new Set();
+  const targetNames = new Set();
+  for (const tc of targetColls) {
+    targetNames.add(tc.name);
+    try {
+      const details = await getCollectionDetails(tc.uid);
+      const forkFrom = details?.fork?.from;
+      if (forkFrom) targetForkSources.add(forkFrom);
+    } catch { /* ignore */ }
+    await delay(300);
+  }
+  const newCollections = sourceColls.filter(sc => !targetForkSources.has(sc.uid) && !targetNames.has(sc.name));
+
+  // Specs: name match
+  const normalize = (name) => (name || '').toLowerCase().trim();
+  const targetSpecNames = new Set(targetSpecs.map(s => normalize(s.name)));
+  const newSpecs = sourceSpecs.filter(s => !targetSpecNames.has(normalize(s.name)));
+
+  // Auto-link specs to collections
+  const newCollectionNames = new Set(newCollections.map(c => normalize(c.name)));
+  const linkedSpecs = newSpecs.filter(s => newCollectionNames.has(normalize(s.name)));
+
+  // Environments: name match, exclude Mock Env
+  const targetEnvNames = new Set(targetEnvs.map(e => normalize(e.name)));
+  const newEnvironments = sourceEnvs.filter(e => normalize(e.name) !== 'mock env' && !targetEnvNames.has(normalize(e.name)));
+
+  const isUpToDate = newCollections.length === 0 && linkedSpecs.length === 0 && newEnvironments.length === 0;
+
+  return { newCollections, newSpecs: linkedSpecs, newEnvironments, isUpToDate };
 };
 
 // ============================================================================
@@ -1974,6 +2033,10 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
       onProgress?.({ phase: "specs", message: "Copying specs...", progress: 80 });
       let srcSpecs = await getAllSpecs(sourceWorkspaceId);
       if (selectedSpecIds?.length > 0) srcSpecs = srcSpecs.filter((s) => selectedSpecIds.includes(s.id));
+      // Auto-link: only copy specs whose names match a copied collection
+      const normSpec = (name) => (name || '').toLowerCase().trim();
+      const copiedCollNamesCustom = new Set(results.collections.successData.map(c => normSpec(c.name)));
+      srcSpecs = srcSpecs.filter(s => copiedCollNamesCustom.has(normSpec(s.name)));
       results.specs.total = srcSpecs.length;
       for (let i = 0; i < srcSpecs.length; i++) {
         const spec = srcSpecs[i];

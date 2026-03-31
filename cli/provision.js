@@ -1399,19 +1399,26 @@ const SpecsHelper = {
    */
   async copyAll(sourceWorkspaceId, targetWorkspaceId) {
     const results = { success: [], failed: [] };
-    
+
     const sourceSpecs = await SpecsAPI.getAll(sourceWorkspaceId);
-    
+
     if (sourceSpecs.length === 0) {
       log.warn('No specs found in source workspace');
       return results;
     }
-    
-    log.info(`Found ${sourceSpecs.length} spec(s) to copy`);
-    
-    for (let i = 0; i < sourceSpecs.length; i++) {
-      const spec = sourceSpecs[i];
-      log.info(`\n  [${i + 1}/${sourceSpecs.length}] Processing spec: ${spec.name} (${spec.type})`);
+
+    // Auto-link: only copy specs whose names match a copied collection
+    const normalize = (name) => (name || '').toLowerCase().trim();
+    const copiedCollectionNames = new Set(
+      Array.from(Store.collections.values()).map(c => normalize(c.name))
+    );
+    const linkedSpecs = sourceSpecs.filter(s => copiedCollectionNames.has(normalize(s.name)));
+
+    log.info(`Found ${sourceSpecs.length} spec(s), ${linkedSpecs.length} linked to collections`);
+
+    for (let i = 0; i < linkedSpecs.length; i++) {
+      const spec = linkedSpecs[i];
+      log.info(`\n  [${i + 1}/${linkedSpecs.length}] Processing spec: ${spec.name} (${spec.type})`);
       
       const copyResult = await this.copySpec(
         spec.id,
