@@ -11,6 +11,7 @@ Comprehensive tooling for automated Postman partner workspace provisioning and m
   - [Available Methods](#available-methods)
   - [Provisioning Methods](#provisioning-methods)
   - [Reset Methods](#reset-methods)
+  - [Update Methods](#update-methods)
   - [Team & Partner Management](#team--partner-management)
   - [Helper Methods](#helper-methods)
 - [API Reference](#api-reference)
@@ -45,6 +46,17 @@ Deletes workspace resources in reverse dependency order:
 3. Delete Environments
 4. Delete Collections
 
+### Update Workflow
+
+Detects and adds new assets from a source workspace to an existing partner workspace:
+1. Scan source and target workspaces for differences
+2. Fork new collections to target workspace
+3. Create mock servers for new collections
+4. Update existing "Mock Env" with new mock URL variables (in-place)
+5. Update new collection variables to reference mock env
+6. Copy new API specs
+7. Copy new environments
+
 ---
 
 ## Features
@@ -56,6 +68,7 @@ Deletes workspace resources in reverse dependency order:
 - **Mock Environment Creation** — always creates a fresh "Mock Env" with bare mock server URLs; detects host variables via request URL inspection with fallback to common variable names
 - **Collection Variable Mapping** — after creating mock env variables, each forked collection is PATCHed to update its host variables to reference the corresponding mock env variable
 - **Custom Selection Provisioning** — choose specific asset types and individual items
+- **Workspace Update Detection** — scan for new collections, specs, and environments added to the source workspace; add them to partner workspace with full mock URL wiring without touching existing assets
 - **Safe Reset Functionality** — dependency-aware deletion order, selective deletion
 - **Robust Error Handling** — progress callbacks, rate limit management, partial failure handling
 
@@ -166,6 +179,7 @@ public class WorkspaceManager {
 | **Provisioning** | `provisionCustomWorkspace()` | Selective provisioning with options |
 | **Reset** | `resetWorkspace()` | Delete all/selected asset types |
 | **Reset** | `resetCustomWorkspace()` | Delete specific items |
+| **Update** | `updateWorkspaceAssets()` | Detect and add new assets from source to target |
 | **Team** | `addWorkspaceAdmin()` | Add a user as workspace admin |
 | **Team** | `addMultipleAdmins()` | Batch add multiple admins |
 | **Partners** | `invitePartner()` | Invite a partner by email |
@@ -257,6 +271,21 @@ postmanService.resetWorkspace(
     System.out.println("Deleted specs: " + result.deletedSpecs());
     System.out.println("Deleted mocks: " + result.deletedMocks());
 });
+```
+
+---
+
+### Update Methods
+
+#### `updateWorkspaceAssets()` — Detect and Add New Assets
+
+```java
+postmanService.updateWorkspaceAssets("source-workspace-id", "target-workspace-id")
+    .subscribe(result -> {
+        System.out.println("New collections: " + result.get("newCollections"));
+        System.out.println("New specs: " + result.get("newSpecs"));
+        System.out.println("New environments: " + result.get("newEnvironments"));
+    });
 ```
 
 ---
@@ -394,6 +423,16 @@ public class WorkspaceController {
 2. **Mock Servers** — Depend on collections
 3. **Environments** — Independent
 4. **Collections** — Deleted last
+
+### Update Order
+
+1. **Detection** — Compare source and target workspaces (fork-check then name-match for collections, name-match for specs/environments)
+2. **Fork Collections** — Fork new collections from source to target
+3. **Mock Servers** — Create for each new collection
+4. **Mock Environment** — Update existing "Mock Env" in-place with new mock URL variables (or create if missing)
+5. **Collection Variables** — PATCH new collection host variables to reference mock env variables
+6. **API Specs** — Copy new specification files
+7. **Environments** — Copy new environments (excludes "Mock Env")
 
 ### Rate Limiting
 
