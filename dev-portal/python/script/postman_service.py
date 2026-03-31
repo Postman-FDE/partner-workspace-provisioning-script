@@ -1909,6 +1909,334 @@ async def quick_provision(
 
 
 # ============================================================================
+# UPDATE OPERATIONS
+# ============================================================================
+
+
+async def update_workspace_assets(
+    source_workspace_id: str,
+    target_workspace_id: str,
+    on_progress: Optional[ProgressCallback] = None,
+) -> dict[str, Any]:
+    """
+    Update a target workspace by detecting and adding net-new assets from source.
+
+    Detects new collections (fork check + name fallback), specs (name match),
+    and environments (name match, excluding "Mock Env"). Forks new collections,
+    creates mock servers, updates Mock Env in-place with dedup, updates collection
+    variables, and copies new specs and environments.
+    """
+    if not _get_api_key():
+        raise ValueError("Postman API key not configured")
+    if not source_workspace_id:
+        raise ValueError("Source workspace ID is required")
+    if not target_workspace_id:
+        raise ValueError("Target workspace ID is required")
+
+    results: dict[str, Any] = {
+        "collections": {"total": 0, "success": 0, "failed": [], "success_data": []},
+        "mocks": {"total": 0, "success": 0, "failed": [], "urls": []},
+        "mock_env": {"success": False, "action": None},
+        "specs": {"total": 0, "success": 0, "failed": [], "success_data": []},
+        "environments": {"total": 0, "success": 0, "failed": [], "success_data": []},
+        "errors": [],
+    }
+
+    try:
+        # Step 1: Detect new assets
+        if on_progress:
+            on_progress({"phase": "detection", "message": "Scanning workspaces for new assets...", "progress": 5})
+
+        source_colls = await get_all_collections(source_workspace_id)
+        target_colls = await get_all_collections(target_workspace_id)
+        source_specs = await get_all_specs(source_workspace_id)
+        target_specs = await get_all_specs(target_workspace_id)
+        source_envs = await get_all_environments(source_workspace_id)
+        target_envs = await get_all_environments(target_workspace_id)
+
+        # Collections: fork check + name fallback
+        target_fork_sources: set[str] = set()
+        target_names: set[str] = set()
+        for tc in target_colls:
+            target_names.add(tc.get("name", ""))
+            try:
+                details = await get_collection_details(tc["uid"])
+                if details:
+                    fork_from = (details.get("fork") or {}).get("from")
+                    if fork_from:
+                        target_fork_sources.add(fork_from)
+            except Exception:
+                pass
+            await asyncio.sleep(0.3)
+
+        new_collections = [
+            sc for sc in source_colls
+            if sc.get("uid") not in target_fork_sources and sc.get("name") not in target_names
+        ]
+
+        # Specs: name match
+        target_spec_names = {s.get("name") for s in target_specs}
+        new_specs = [s for s in source_specs if s.get("name") not in target_spec_names]
+
+        # Environments: name match, exclude Mock Env
+        target_env_names = {e.get("name") for e in target_envs}
+        new_environments = [
+            e for e in source_envs
+            if e.get("name") != "Mock Env" and e.get("name") not in target_env_names
+        ]
+
+        if on_progress:
+            on_progress({
+                "phase": "detection",
+                "message": f"Found {len(new_collections)} new collection(s), {len(new_specs)} new spec(s), {len(new_environments)} new environment(s)",
+                "progress": 15,
+            })
+
+        if not new_collections and not new_specs and not new_environments:
+            if on_progress:
+                on_progress({"phase": "complete", "message": "Workspace is up to date — no new assets found.", "progress": 100, "results": results})
+            return results
+
+        # Step 2: Fork new collections
+        if on_progress:
+            on_progress({"phase": "collections", "message": "Forking new collections...", "progress": 20})
+        results["collections"]["total"] = len(new_collections)
+
+        for i, collection in enumerate(new_collections):
+            if on_progress:
+                on_progress({
+                    "phase": "collections",
+                    "message": f"Forking: {collection.get('name')}",
+                    "current": i + 1,
+                    "total": len(new_collections),
+                    "progress": 20 + int((i / len(new_collections)) * 15) if new_collections else 20,
+                })
+            fork_result = await fork_collection(collection["uid"], collection["name"], target_workspace_id)
+            if fork_result.success and fork_result.uid:
+                results["collections"]["success"] += 1
+                coll_details = await get_collection_details(fork_result.uid)
+                host_variables = extract_host_variables(coll_details) if coll_details else []
+                results["collections"]["success_data"].append({
+                    "name": fork_result.collection_name,
+                    "uid": fork_result.uid,
+                    "host_variables": host_variables,
+                    "collection_details": coll_details,
+                })
+            else:
+                results["collections"]["failed"].append({"name": collection["name"], "error": fork_result.error})
+                results["errors"].append(f"Failed to fork {collection['name']}: {fork_result.error}")
+            await asyncio.sleep(0.3)
+
+        # Step 3: Create mock servers for new collections
+        if results["collections"]["success_data"]:
+            if on_progress:
+                on_progress({"phase": "mocks", "message": "Creating mock servers...", "progress": 40})
+            results["mocks"]["total"] = len(results["collections"]["success_data"])
+            for i, coll in enumerate(results["collections"]["success_data"]):
+                mock_name = f"{coll['name']} Mock"
+                if on_progress:
+                    total = results["collections"]["success_data"]
+                    on_progress({
+                        "phase": "mocks",
+                        "message": f"Creating: {mock_name}",
+                        "current": i + 1,
+                        "total": len(total),
+                        "progress": 40 + int((i / len(total)) * 15) if total else 40,
+                    })
+                mock_result = await create_mock_server(mock_name, coll["uid"], target_workspace_id, None)
+                if mock_result.success:
+                    results["mocks"]["success"] += 1
+                    results["mocks"]["urls"].append({
+                        "collection_name": coll["name"],
+                        "mock_name": mock_result.mock_name,
+                        "mock_url": mock_result.mock_url,
+                        "target_uid": coll["uid"],
+                        "host_variables": coll.get("host_variables", []),
+                    })
+                else:
+                    results["mocks"]["failed"].append({"name": mock_name, "error": mock_result.error})
+                    results["errors"].append(f"Failed to create mock {mock_name}: {mock_result.error}")
+                await asyncio.sleep(0.3)
+
+        # Step 4: Update Mock Env in-place (or create if missing)
+        mock_env_var_map: dict[str, str] = {}
+        if results["mocks"]["urls"]:
+            if on_progress:
+                on_progress({"phase": "mockEnv", "message": "Updating Mock Environment...", "progress": 60})
+
+            new_variables: list[dict[str, Any]] = []
+            for mock_entry in results["mocks"]["urls"]:
+                coll_name = mock_entry["collection_name"]
+                mock_url = mock_entry["mock_url"]
+                target_uid = mock_entry["target_uid"]
+                host_vars = mock_entry.get("host_variables", [])
+                if host_vars:
+                    camel_name = to_camel_case(coll_name)
+                    for hv in host_vars:
+                        pascal_var = to_pascal_case(hv["var_name"])
+                        env_var_name = f"{camel_name}{pascal_var}"
+                        new_variables.append({
+                            "key": env_var_name, "value": mock_url, "type": "default", "enabled": True,
+                        })
+                        mock_env_var_map[f"{target_uid}:{hv['var_name']}"] = env_var_name
+                else:
+                    camel_name = to_camel_case(coll_name)
+                    env_var_name = f"{camel_name}BaseUrl"
+                    new_variables.append({
+                        "key": env_var_name, "value": mock_url, "type": "default", "enabled": True,
+                    })
+                    mock_env_var_map[f"{target_uid}:__fallback__"] = env_var_name
+
+            if new_variables:
+                mock_env = next((e for e in target_envs if e.get("name") == "Mock Env"), None)
+                if mock_env:
+                    # Update existing Mock Env in-place with deduplication
+                    env_details = await get_environment_details(mock_env["uid"])
+                    existing_vars = env_details.get("values", []) if env_details else []
+                    existing_keys: set[str] = {v.get("key", "") for v in existing_vars}
+
+                    deduped: list[dict[str, Any]] = []
+                    for v in new_variables:
+                        if v["key"] in existing_keys:
+                            suffix = 2
+                            new_key = f"{v['key']}{suffix}"
+                            while new_key in existing_keys:
+                                suffix += 1
+                                new_key = f"{v['key']}{suffix}"
+                            existing_keys.add(new_key)
+                            # Update the map to reflect the deduped key
+                            for map_key, map_val in list(mock_env_var_map.items()):
+                                if map_val == v["key"]:
+                                    mock_env_var_map[map_key] = new_key
+                            deduped.append({**v, "key": new_key})
+                        else:
+                            existing_keys.add(v["key"])
+                            deduped.append(v)
+
+                    merged = existing_vars + deduped
+                    update_result = await update_environment(mock_env["uid"], "Mock Env", merged)
+                    results["mock_env"] = {"success": update_result.get("success", False), "action": "updated"}
+                    if not update_result.get("success"):
+                        results["errors"].append(f"Failed to update Mock Env: {update_result.get('error', 'Unknown error')}")
+                else:
+                    # Create fresh Mock Env
+                    create_result = await create_environment_in_postman("Mock Env", new_variables, target_workspace_id)
+                    results["mock_env"] = {"success": create_result.success, "action": "created"}
+                    if not create_result.success:
+                        results["errors"].append(f"Failed to create Mock Env: {create_result.error}")
+
+        # Step 5: Update collection variables to reference mock env var names
+        if mock_env_var_map:
+            if on_progress:
+                on_progress({"phase": "collectionVars", "message": "Updating collection variables...", "progress": 70})
+            for coll in results["collections"]["success_data"]:
+                if not coll.get("collection_details"):
+                    continue
+                host_vars = coll.get("host_variables", [])
+                existing_vars = coll["collection_details"].get("variable", [])
+                updated_vars: list[dict[str, Any]] = []
+
+                if host_vars:
+                    matched_keys: set[str] = set()
+                    for v in existing_vars:
+                        hv = next((h for h in host_vars if h["var_name"] == v.get("key")), None)
+                        if hv:
+                            env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
+                            if env_name:
+                                updated_vars.append({**v, "value": f"{{{{{env_name}}}}}"})
+                                matched_keys.add(hv["var_name"])
+                                continue
+                        updated_vars.append(v)
+                    for hv in host_vars:
+                        env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
+                        if env_name and hv["var_name"] not in matched_keys:
+                            updated_vars.append({"key": hv["var_name"], "value": f"{{{{{env_name}}}}}", "type": "string"})
+                    await patch_collection_variables(coll["uid"], updated_vars)
+                else:
+                    env_name = mock_env_var_map.get(f"{coll['uid']}:__fallback__")
+                    if not env_name:
+                        continue
+                    fallback_done = False
+                    for v in existing_vars:
+                        if not fallback_done and v.get("key") in COMMON_HOST_VAR_NAMES:
+                            updated_vars.append({**v, "value": f"{{{{{env_name}}}}}"})
+                            fallback_done = True
+                        else:
+                            updated_vars.append(v)
+                    if not fallback_done:
+                        updated_vars.append({"key": "baseUrl", "value": f"{{{{{env_name}}}}}", "type": "string"})
+                    await patch_collection_variables(coll["uid"], updated_vars)
+                await asyncio.sleep(0.3)
+
+        # Step 6: Copy new specs
+        if new_specs:
+            if on_progress:
+                on_progress({"phase": "specs", "message": "Copying new specs...", "progress": 80})
+            results["specs"]["total"] = len(new_specs)
+            for i, spec in enumerate(new_specs):
+                if on_progress:
+                    on_progress({
+                        "phase": "specs",
+                        "message": f"Copying: {spec.get('name')}",
+                        "current": i + 1,
+                        "total": len(new_specs),
+                        "progress": 80 + int((i / len(new_specs)) * 10),
+                    })
+                copy_result = await copy_spec(spec["id"], spec["name"], spec["type"], target_workspace_id)
+                if copy_result.success:
+                    results["specs"]["success"] += 1
+                    results["specs"]["success_data"].append({
+                        "name": copy_result.spec_name,
+                        "id": copy_result.new_spec_id,
+                        "files_copied": copy_result.files_copied,
+                    })
+                else:
+                    results["specs"]["failed"].append({"name": spec["name"], "error": "; ".join(copy_result.errors)})
+                    results["errors"].append(f"Failed to copy spec {spec['name']}")
+                await asyncio.sleep(0.5)
+
+        # Step 7: Copy new environments
+        if new_environments:
+            if on_progress:
+                on_progress({"phase": "environments", "message": "Copying new environments...", "progress": 90})
+            results["environments"]["total"] = len(new_environments)
+            for i, env in enumerate(new_environments):
+                if on_progress:
+                    on_progress({
+                        "phase": "environments",
+                        "message": f"Copying: {env.get('name')}",
+                        "current": i + 1,
+                        "total": len(new_environments),
+                        "progress": 90 + int((i / len(new_environments)) * 9),
+                    })
+                env_details = await get_environment_details(env["uid"])
+                if not env_details:
+                    results["environments"]["failed"].append({"name": env.get("name", ""), "error": "Could not get environment details"})
+                    continue
+                create_result = await create_environment_in_postman(
+                    env_details["name"], env_details.get("values", []), target_workspace_id
+                )
+                if create_result.success and create_result.uid:
+                    results["environments"]["success"] += 1
+                    results["environments"]["success_data"].append({
+                        "name": create_result.environment_name, "uid": create_result.uid,
+                    })
+                else:
+                    results["environments"]["failed"].append({"name": env_details["name"], "error": create_result.error})
+                    results["errors"].append(f"Failed to copy environment {env_details['name']}: {create_result.error}")
+                await asyncio.sleep(0.3)
+
+        if on_progress:
+            on_progress({"phase": "complete", "message": "Update complete!", "progress": 100, "results": results})
+        return results
+    except Exception as e:
+        results["errors"].append(str(e))
+        if on_progress:
+            on_progress({"phase": "error", "message": f"Error: {e}", "progress": 0, "results": results})
+        raise
+
+
+# ============================================================================
 # CONFIGURATION & UTILITIES
 # ============================================================================
 

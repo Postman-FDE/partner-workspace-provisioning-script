@@ -186,6 +186,10 @@ public class PostmanService {
                                      List<String> selectedEnvironmentUids, List<String> selectedMockIds,
                                      List<String> selectedSpecIds) {}
 
+    public record UpdateResult(Map<String, Object> collections, Map<String, Object> mocks,
+                               Map<String, Object> mockEnv, Map<String, Object> specs,
+                               Map<String, Object> environments, List<String> errors) {}
+
     // ============================================================================
     // UTILITIES
     // ============================================================================
@@ -1719,6 +1723,432 @@ public class PostmanService {
         String partnerRole = options != null && options.get("partnerRoleId") != null ? options.get("partnerRoleId").toString() : "7";
         ProvisionOptions opts = ProvisionOptions.of(sourceWorkspaceId, null, workspaceName, workspaceType, adminIds, partnerEmails, partnerRole);
         return provisionWorkspace(opts, onProgress);
+    }
+
+    // ============================================================================
+    // UPDATE OPERATIONS
+    // ============================================================================
+
+    /**
+     * Update a target workspace by detecting and adding net-new assets from source.
+     * Detects new collections (fork check + name fallback), specs (name match),
+     * and environments (name match, excluding "Mock Env"). Forks new collections,
+     * creates mock servers, updates Mock Env in-place with dedup, updates collection
+     * variables, and copies new specs and environments.
+     */
+    @SuppressWarnings("unchecked")
+    public Mono<Map<String, Object>> updateWorkspaceAssets(String sourceWorkspaceId, String targetWorkspaceId,
+                                                           Consumer<Map<String, Object>> onProgress) {
+        if (postmanApiKey == null || postmanApiKey.isEmpty()) {
+            return Mono.error(new IllegalStateException("Postman API key not configured"));
+        }
+        if (sourceWorkspaceId == null || sourceWorkspaceId.isEmpty()) {
+            return Mono.error(new IllegalStateException("Source workspace ID is required"));
+        }
+        if (targetWorkspaceId == null || targetWorkspaceId.isEmpty()) {
+            return Mono.error(new IllegalStateException("Target workspace ID is required"));
+        }
+
+        Map<String, Object> results = new HashMap<>();
+        Map<String, Object> collections = new HashMap<>();
+        collections.put("total", 0); collections.put("success", 0);
+        collections.put("failed", new ArrayList<>()); collections.put("successData", new ArrayList<>());
+        Map<String, Object> mocks = new HashMap<>();
+        mocks.put("total", 0); mocks.put("success", 0);
+        mocks.put("failed", new ArrayList<>()); mocks.put("urls", new ArrayList<>());
+        Map<String, Object> mockEnvResult = new HashMap<>();
+        mockEnvResult.put("success", false); mockEnvResult.put("action", null);
+        Map<String, Object> specs = new HashMap<>();
+        specs.put("total", 0); specs.put("success", 0);
+        specs.put("failed", new ArrayList<>()); specs.put("successData", new ArrayList<>());
+        Map<String, Object> environments = new HashMap<>();
+        environments.put("total", 0); environments.put("success", 0);
+        environments.put("failed", new ArrayList<>()); environments.put("successData", new ArrayList<>());
+        results.put("collections", collections);
+        results.put("mocks", mocks);
+        results.put("mockEnv", mockEnvResult);
+        results.put("specs", specs);
+        results.put("environments", environments);
+        results.put("errors", new ArrayList<String>());
+        List<String> errors = (List<String>) results.get("errors");
+        Map<String, String> mockEnvVarMap = new HashMap<>();
+
+        progress(onProgress, Map.of("phase", "detection", "message", "Scanning workspaces for new assets...", "progress", 5));
+
+        // Step 1: Detect new assets
+        return Mono.zip(
+                getAllCollections(sourceWorkspaceId),
+                getAllCollections(targetWorkspaceId),
+                getAllSpecs(sourceWorkspaceId),
+                getAllSpecs(targetWorkspaceId),
+                getAllEnvironments(sourceWorkspaceId),
+                getAllEnvironments(targetWorkspaceId)
+        ).flatMap(tuple -> {
+            List<Map<String, Object>> sourceColls = tuple.getT1();
+            List<Map<String, Object>> targetColls = tuple.getT2();
+            List<Map<String, Object>> sourceSpecs = tuple.getT3();
+            List<Map<String, Object>> targetSpecs = tuple.getT4();
+            List<Map<String, Object>> sourceEnvs = tuple.getT5();
+            List<Map<String, Object>> targetEnvs = tuple.getT6();
+
+            // Collections: fork check + name fallback
+            Set<String> targetForkSources = new HashSet<>();
+            Set<String> targetNames = new HashSet<>();
+            for (Map<String, Object> tc : targetColls) {
+                targetNames.add((String) tc.get("name"));
+            }
+
+            return Flux.fromIterable(targetColls)
+                    .concatMap(tc -> {
+                        String uid = (String) tc.get("uid");
+                        return getCollectionDetails(uid)
+                                .doOnNext(details -> {
+                                    if (details != null) {
+                                        Map<String, Object> fork = (Map<String, Object>) details.get("fork");
+                                        if (fork != null && fork.get("from") != null) {
+                                            targetForkSources.add((String) fork.get("from"));
+                                        }
+                                    }
+                                })
+                                .onErrorResume(e -> Mono.empty())
+                                .then(delay(300));
+                    })
+                    .then(Mono.defer(() -> {
+                        List<Map<String, Object>> newCollections = sourceColls.stream()
+                                .filter(sc -> !targetForkSources.contains(sc.get("uid")) && !targetNames.contains(sc.get("name")))
+                                .collect(Collectors.toList());
+
+                        Set<String> targetSpecNames = targetSpecs.stream()
+                                .map(s -> (String) s.get("name")).collect(Collectors.toSet());
+                        List<Map<String, Object>> newSpecs = sourceSpecs.stream()
+                                .filter(s -> !targetSpecNames.contains(s.get("name")))
+                                .collect(Collectors.toList());
+
+                        Set<String> targetEnvNames = targetEnvs.stream()
+                                .map(e -> (String) e.get("name")).collect(Collectors.toSet());
+                        List<Map<String, Object>> newEnvironments = sourceEnvs.stream()
+                                .filter(e -> !"Mock Env".equals(e.get("name")) && !targetEnvNames.contains(e.get("name")))
+                                .collect(Collectors.toList());
+
+                        progress(onProgress, Map.of("phase", "detection", "message",
+                                "Found " + newCollections.size() + " new collection(s), " + newSpecs.size() + " new spec(s), " + newEnvironments.size() + " new environment(s)",
+                                "progress", 15));
+
+                        if (newCollections.isEmpty() && newSpecs.isEmpty() && newEnvironments.isEmpty()) {
+                            progress(onProgress, Map.of("phase", "complete", "message", "Workspace is up to date — no new assets found.", "progress", 100));
+                            return Mono.just(results);
+                        }
+
+                        // Step 2: Fork new collections
+                        progress(onProgress, Map.of("phase", "collections", "message", "Forking new collections...", "progress", 20));
+                        collections.put("total", newCollections.size());
+                        List<Map<String, Object>> collSuccessData = (List<Map<String, Object>>) collections.get("successData");
+
+                        return Flux.fromIterable(newCollections)
+                                .index()
+                                .concatMap(t -> {
+                                    int idx = (int) t.getT1() + 1;
+                                    Map<String, Object> coll = t.getT2();
+                                    String name = (String) coll.get("name");
+                                    String uid = (String) coll.get("uid");
+                                    progress(onProgress, Map.of("phase", "collections", "message", "Forking: " + name,
+                                            "current", idx, "total", newCollections.size(),
+                                            "progress", 20 + (int) ((double) idx / newCollections.size() * 15)));
+                                    return forkCollection(uid, name, targetWorkspaceId)
+                                            .flatMap(forkResult -> {
+                                                if (forkResult.success()) {
+                                                    collections.put("success", (int) collections.get("success") + 1);
+                                                    return getCollectionDetails(forkResult.uid())
+                                                            .defaultIfEmpty(Map.of())
+                                                            .flatMap(collDetails -> {
+                                                                List<Map<String, Object>> hostVars = collDetails.isEmpty()
+                                                                        ? List.of() : extractHostVariables(collDetails);
+                                                                Map<String, Object> entry = new HashMap<>();
+                                                                entry.put("name", forkResult.collectionName());
+                                                                entry.put("uid", forkResult.uid());
+                                                                entry.put("hostVariables", hostVars);
+                                                                entry.put("collectionDetails", collDetails);
+                                                                collSuccessData.add(entry);
+                                                                return delay(300);
+                                                            });
+                                                } else {
+                                                    ((List<Map<String, Object>>) collections.get("failed"))
+                                                            .add(Map.of("name", name, "error", forkResult.error()));
+                                                    errors.add("Failed to fork " + name + ": " + forkResult.error());
+                                                    return delay(300);
+                                                }
+                                            });
+                                })
+                                // Step 3: Create mock servers
+                                .then(Mono.defer(() -> {
+                                    if (collSuccessData.isEmpty()) return Mono.<Void>empty();
+                                    progress(onProgress, Map.of("phase", "mocks", "message", "Creating mock servers...", "progress", 40));
+                                    mocks.put("total", collSuccessData.size());
+                                    return Flux.fromIterable(new ArrayList<>(collSuccessData))
+                                            .index()
+                                            .concatMap(t -> {
+                                                int idx = (int) t.getT1() + 1;
+                                                Map<String, Object> cd = t.getT2();
+                                                String collName = (String) cd.get("name");
+                                                String collUid = (String) cd.get("uid");
+                                                String mockName = collName + " Mock";
+                                                progress(onProgress, Map.of("phase", "mocks", "message", "Creating: " + mockName,
+                                                        "current", idx, "total", collSuccessData.size(),
+                                                        "progress", 40 + (int) ((double) idx / collSuccessData.size() * 15)));
+                                                return createMockServer(mockName, collUid, targetWorkspaceId, null)
+                                                        .flatMap(mockResult -> {
+                                                            if (mockResult.success()) {
+                                                                mocks.put("success", (int) mocks.get("success") + 1);
+                                                                List<Map<String, Object>> urls = (List<Map<String, Object>>) mocks.get("urls");
+                                                                List<Map<String, Object>> hvs = (List<Map<String, Object>>) cd.getOrDefault("hostVariables", List.of());
+                                                                Map<String, Object> urlEntry = new HashMap<>();
+                                                                urlEntry.put("collectionName", collName);
+                                                                urlEntry.put("mockName", mockResult.mockName());
+                                                                urlEntry.put("mockUrl", mockResult.mockUrl());
+                                                                urlEntry.put("targetUid", collUid);
+                                                                urlEntry.put("hostVariables", hvs);
+                                                                urls.add(urlEntry);
+                                                            } else {
+                                                                ((List<Map<String, Object>>) mocks.get("failed"))
+                                                                        .add(Map.of("name", mockName, "error", mockResult.error()));
+                                                                errors.add("Failed to create mock " + mockName + ": " + mockResult.error());
+                                                            }
+                                                            return delay(300);
+                                                        });
+                                            })
+                                            .then();
+                                }))
+                                // Step 4: Update Mock Env in-place (or create if missing)
+                                .then(Mono.defer(() -> {
+                                    List<Map<String, Object>> mockUrls = (List<Map<String, Object>>) mocks.get("urls");
+                                    if (mockUrls.isEmpty()) return Mono.<Void>empty();
+                                    progress(onProgress, Map.of("phase", "mockEnv", "message", "Updating Mock Environment...", "progress", 60));
+
+                                    List<Map<String, Object>> newVars = new ArrayList<>();
+                                    for (Map<String, Object> mock : mockUrls) {
+                                        List<Map<String, Object>> hvs = (List<Map<String, Object>>) mock.getOrDefault("hostVariables", List.of());
+                                        String collName = (String) mock.get("collectionName");
+                                        String mockUrl = (String) mock.get("mockUrl");
+                                        String tUid = (String) mock.get("targetUid");
+                                        if (hvs.isEmpty()) {
+                                            String varName = toCamelCase(collName) + "BaseUrl";
+                                            newVars.add(Map.of("key", varName, "value", mockUrl, "type", "default", "enabled", true));
+                                            mockEnvVarMap.put(tUid + ":__fallback__", varName);
+                                        } else {
+                                            for (Map<String, Object> hv : hvs) {
+                                                String envVarName = toCamelCase(collName) + toPascalCase((String) hv.get("varName"));
+                                                newVars.add(Map.of("key", envVarName, "value", mockUrl, "type", "default", "enabled", true));
+                                                mockEnvVarMap.put(tUid + ":" + hv.get("varName"), envVarName);
+                                            }
+                                        }
+                                    }
+                                    if (newVars.isEmpty()) return Mono.<Void>empty();
+
+                                    Map<String, Object> existingMockEnv = targetEnvs.stream()
+                                            .filter(e -> "Mock Env".equals(e.get("name")))
+                                            .findFirst().orElse(null);
+
+                                    if (existingMockEnv != null) {
+                                        // Update existing Mock Env in-place with deduplication
+                                        return getEnvironmentDetails((String) existingMockEnv.get("uid"))
+                                                .flatMap(envDetails -> {
+                                                    List<Map<String, Object>> existingVars = envDetails != null
+                                                            ? (List<Map<String, Object>>) envDetails.getOrDefault("values", List.of())
+                                                            : List.of();
+                                                    Set<String> existingKeys = new HashSet<>();
+                                                    for (Map<String, Object> v : existingVars) {
+                                                        existingKeys.add((String) v.get("key"));
+                                                    }
+
+                                                    List<Map<String, Object>> deduped = new ArrayList<>();
+                                                    for (Map<String, Object> v : newVars) {
+                                                        String key = (String) v.get("key");
+                                                        if (existingKeys.contains(key)) {
+                                                            int suffix = 2;
+                                                            String newKey = key + suffix;
+                                                            while (existingKeys.contains(newKey)) { suffix++; newKey = key + suffix; }
+                                                            existingKeys.add(newKey);
+                                                            for (Map.Entry<String, String> me : mockEnvVarMap.entrySet()) {
+                                                                if (me.getValue().equals(key)) {
+                                                                    mockEnvVarMap.put(me.getKey(), newKey);
+                                                                }
+                                                            }
+                                                            Map<String, Object> dedupedVar = new HashMap<>(v);
+                                                            dedupedVar.put("key", newKey);
+                                                            deduped.add(dedupedVar);
+                                                        } else {
+                                                            existingKeys.add(key);
+                                                            deduped.add(v);
+                                                        }
+                                                    }
+
+                                                    List<Map<String, Object>> merged = new ArrayList<>(existingVars);
+                                                    merged.addAll(deduped);
+                                                    return updateEnvironment((String) existingMockEnv.get("uid"), "Mock Env", merged)
+                                                            .doOnNext(ur -> {
+                                                                mockEnvResult.put("success", ur.success());
+                                                                mockEnvResult.put("action", "updated");
+                                                                if (!ur.success()) errors.add("Failed to update Mock Env: " + ur.error());
+                                                            })
+                                                            .then();
+                                                });
+                                    } else {
+                                        // Create fresh Mock Env
+                                        return createEnvironmentInPostman("Mock Env", newVars, targetWorkspaceId)
+                                                .doOnNext(cr -> {
+                                                    mockEnvResult.put("success", cr.success());
+                                                    mockEnvResult.put("action", "created");
+                                                    if (!cr.success()) errors.add("Failed to create Mock Env: " + cr.error());
+                                                })
+                                                .then();
+                                    }
+                                }))
+                                // Step 5: Update collection variables
+                                .then(Mono.defer(() -> {
+                                    if (mockEnvVarMap.isEmpty()) return Mono.<Void>empty();
+                                    progress(onProgress, Map.of("phase", "collectionVars", "message", "Updating collection variables...", "progress", 70));
+                                    return Flux.fromIterable(new ArrayList<>(collSuccessData))
+                                            .concatMap(cd -> {
+                                                List<Map<String, Object>> hvList = (List<Map<String, Object>>) cd.getOrDefault("hostVariables", List.of());
+                                                Map<String, Object> collDetails = (Map<String, Object>) cd.get("collectionDetails");
+                                                if (collDetails == null || collDetails.isEmpty()) return Mono.empty();
+                                                List<Map<String, Object>> existingVars = (List<Map<String, Object>>) collDetails.getOrDefault("variable", List.of());
+                                                String collUid = (String) cd.get("uid");
+
+                                                if (!hvList.isEmpty()) {
+                                                    Set<String> matchedKeys = new HashSet<>();
+                                                    List<Map<String, Object>> updatedVars = existingVars.stream().map(v -> {
+                                                        String key = (String) v.get("key");
+                                                        for (Map<String, Object> hv : hvList) {
+                                                            if (hv.get("varName").equals(key)) {
+                                                                String envName = mockEnvVarMap.get(collUid + ":" + hv.get("varName"));
+                                                                if (envName != null) {
+                                                                    matchedKeys.add(key);
+                                                                    Map<String, Object> updated = new HashMap<>(v);
+                                                                    updated.put("value", "{{" + envName + "}}");
+                                                                    return updated;
+                                                                }
+                                                            }
+                                                        }
+                                                        return v;
+                                                    }).collect(Collectors.toList());
+                                                    for (Map<String, Object> hv : hvList) {
+                                                        String varName = (String) hv.get("varName");
+                                                        String envName = mockEnvVarMap.get(collUid + ":" + varName);
+                                                        if (envName != null && !matchedKeys.contains(varName)) {
+                                                            updatedVars.add(Map.of("key", varName, "value", "{{" + envName + "}}", "type", "string"));
+                                                        }
+                                                    }
+                                                    return patchCollectionVariables(collUid, updatedVars).then(delay(300));
+                                                }
+
+                                                String fallbackEnv = mockEnvVarMap.get(collUid + ":__fallback__");
+                                                if (fallbackEnv == null) return Mono.empty();
+                                                boolean[] matched = {false};
+                                                List<Map<String, Object>> updatedVars = existingVars.stream().map(v -> {
+                                                    String key = String.valueOf(v.get("key"));
+                                                    if (!matched[0] && COMMON_HOST_VAR_NAMES.contains(key)) {
+                                                        matched[0] = true;
+                                                        Map<String, Object> updated = new HashMap<>(v);
+                                                        updated.put("value", "{{" + fallbackEnv + "}}");
+                                                        return updated;
+                                                    }
+                                                    return v;
+                                                }).collect(Collectors.toList());
+                                                if (!matched[0]) {
+                                                    updatedVars.add(Map.of("key", "baseUrl", "value", "{{" + fallbackEnv + "}}", "type", "string"));
+                                                }
+                                                return patchCollectionVariables(collUid, updatedVars).then(delay(300));
+                                            })
+                                            .then();
+                                }))
+                                // Step 6: Copy new specs
+                                .then(Mono.defer(() -> {
+                                    if (newSpecs.isEmpty()) return Mono.<Void>empty();
+                                    progress(onProgress, Map.of("phase", "specs", "message", "Copying new specs...", "progress", 80));
+                                    specs.put("total", newSpecs.size());
+                                    return Flux.fromIterable(newSpecs)
+                                            .index()
+                                            .concatMap(t -> {
+                                                int idx = (int) t.getT1() + 1;
+                                                Map<String, Object> spec = t.getT2();
+                                                String name = (String) spec.get("name");
+                                                String type = (String) spec.get("type");
+                                                String id = (String) spec.get("id");
+                                                progress(onProgress, Map.of("phase", "specs", "message", "Copying: " + name,
+                                                        "current", idx, "total", newSpecs.size(),
+                                                        "progress", 80 + (int) ((double) idx / newSpecs.size() * 10)));
+                                                return copySpec(id, name, type, targetWorkspaceId, null)
+                                                        .flatMap(cr -> {
+                                                            if (cr.success()) {
+                                                                specs.put("success", (int) specs.get("success") + 1);
+                                                                ((List<Map<String, Object>>) specs.get("successData"))
+                                                                        .add(Map.of("name", cr.specName(), "id", cr.newSpecId(), "filesCopied", cr.filesCopied()));
+                                                            } else {
+                                                                ((List<Map<String, Object>>) specs.get("failed"))
+                                                                        .add(Map.of("name", name, "error", String.join("; ", cr.errors())));
+                                                                errors.add("Failed to copy spec " + name);
+                                                            }
+                                                            return delay(500);
+                                                        });
+                                            })
+                                            .then();
+                                }))
+                                // Step 7: Copy new environments
+                                .then(Mono.defer(() -> {
+                                    if (newEnvironments.isEmpty()) return Mono.<Void>empty();
+                                    progress(onProgress, Map.of("phase", "environments", "message", "Copying new environments...", "progress", 90));
+                                    environments.put("total", newEnvironments.size());
+                                    return Flux.fromIterable(newEnvironments)
+                                            .index()
+                                            .concatMap(t -> {
+                                                int idx = (int) t.getT1() + 1;
+                                                Map<String, Object> env = t.getT2();
+                                                String name = (String) env.get("name");
+                                                String uid = (String) env.get("uid");
+                                                progress(onProgress, Map.of("phase", "environments", "message", "Copying: " + name,
+                                                        "current", idx, "total", newEnvironments.size(),
+                                                        "progress", 90 + (int) ((double) idx / newEnvironments.size() * 9)));
+                                                return getEnvironmentDetails(uid)
+                                                        .flatMap(envDetails -> {
+                                                            if (envDetails == null) {
+                                                                ((List<Map<String, Object>>) environments.get("failed"))
+                                                                        .add(Map.of("name", name, "error", "Could not get environment details"));
+                                                                return delay(300);
+                                                            }
+                                                            List<Map<String, Object>> values = (List<Map<String, Object>>) envDetails.getOrDefault("values", List.of());
+                                                            return createEnvironmentInPostman((String) envDetails.get("name"), values, targetWorkspaceId)
+                                                                    .flatMap(cr -> {
+                                                                        if (cr.success()) {
+                                                                            environments.put("success", (int) environments.get("success") + 1);
+                                                                            ((List<Map<String, Object>>) environments.get("successData"))
+                                                                                    .add(Map.of("name", cr.environmentName(), "uid", cr.uid()));
+                                                                        } else {
+                                                                            ((List<Map<String, Object>>) environments.get("failed"))
+                                                                                    .add(Map.of("name", (String) envDetails.get("name"), "error", cr.error()));
+                                                                            errors.add("Failed to copy environment " + envDetails.get("name") + ": " + cr.error());
+                                                                        }
+                                                                        return delay(300);
+                                                                    });
+                                                        })
+                                                        .switchIfEmpty(Mono.defer(() -> {
+                                                            ((List<Map<String, Object>>) environments.get("failed"))
+                                                                    .add(Map.of("name", name, "error", "Could not get environment details"));
+                                                            return delay(300);
+                                                        }));
+                                            })
+                                            .then();
+                                }))
+                                .then(Mono.defer(() -> {
+                                    progress(onProgress, Map.of("phase", "complete", "message", "Update complete!", "progress", 100));
+                                    return Mono.just(results);
+                                }));
+                    }));
+        }).onErrorResume(e -> {
+            errors.add(e.getMessage());
+            progress(onProgress, Map.of("phase", "error", "message", "Error: " + e.getMessage(), "progress", 0));
+            return Mono.error(e);
+        });
     }
 
     // ============================================================================
