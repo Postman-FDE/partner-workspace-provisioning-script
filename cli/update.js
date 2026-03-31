@@ -200,14 +200,19 @@ async function detectNewAssets(sourceId, targetId) {
 
   const newCollections = sourceColls.filter(sc => !targetForkSources.has(sc.uid) && !targetNames.has(sc.name));
 
+  // Normalize names for robust comparison (case-insensitive, trimmed)
+  const normalize = (name) => (name || '').toLowerCase().trim();
+
   // Specs: name match
-  const targetSpecNames = new Set(targetSpecs.map(s => s.name));
-  const newSpecs = sourceSpecs.filter(s => !targetSpecNames.has(s.name));
+  const targetSpecNames = new Set(targetSpecs.map(s => normalize(s.name)));
+  const newSpecs = sourceSpecs.filter(s => !targetSpecNames.has(normalize(s.name)));
 
   // Environments: name match, exclude Mock Env
-  const targetEnvNames = new Set(targetEnvs.map(e => e.name));
-  const newEnvironments = sourceEnvs.filter(e => e.name !== 'Mock Env' && !targetEnvNames.has(e.name));
+  const targetEnvNames = new Set(targetEnvs.map(e => normalize(e.name)));
+  const newEnvironments = sourceEnvs.filter(e => e.name !== 'Mock Env' && !targetEnvNames.has(normalize(e.name)));
 
+  log.info(`Target spec names: [${targetSpecs.map(s => s.name).join(', ')}]`);
+  log.info(`Source spec names: [${sourceSpecs.map(s => s.name).join(', ')}]`);
   log.info(`New: ${newCollections.length} collections, ${newSpecs.length} specs, ${newEnvironments.length} environments`);
 
   return { newCollections, newSpecs, newEnvironments, targetEnvs };

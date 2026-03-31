@@ -1440,12 +1440,13 @@ export const updateWorkspaceAssets = async ({ sourceWorkspaceId, targetWorkspace
     const newCollections = sourceColls.filter(sc => !targetForkSources.has(sc.uid) && !targetNames.has(sc.name));
 
     // Specs: name match
-    const targetSpecNames = new Set(targetSpecs.map(s => s.name));
-    const newSpecs = sourceSpecs.filter(s => !targetSpecNames.has(s.name));
+    const normalize = (name) => (name || '').toLowerCase().trim();
+    const targetSpecNames = new Set(targetSpecs.map(s => normalize(s.name)));
+    const newSpecs = sourceSpecs.filter(s => !targetSpecNames.has(normalize(s.name)));
 
     // Environments: name match, exclude Mock Env
-    const targetEnvNames = new Set(targetEnvs.map(e => e.name));
-    const newEnvironments = sourceEnvs.filter(e => e.name !== 'Mock Env' && !targetEnvNames.has(e.name));
+    const targetEnvNames = new Set(targetEnvs.map(e => normalize(e.name)));
+    const newEnvironments = sourceEnvs.filter(e => normalize(e.name) !== 'mock env' && !targetEnvNames.has(normalize(e.name)));
 
     onProgress?.({ phase: "detection", message: `Found ${newCollections.length} new collection(s), ${newSpecs.length} new spec(s), ${newEnvironments.length} new environment(s)`, progress: 15 });
 

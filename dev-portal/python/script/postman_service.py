@@ -1975,14 +1975,15 @@ async def update_workspace_assets(
         ]
 
         # Specs: name match
-        target_spec_names = {s.get("name") for s in target_specs}
-        new_specs = [s for s in source_specs if s.get("name") not in target_spec_names]
+        normalize = lambda name: (name or "").lower().strip()
+        target_spec_names = {normalize(s.get("name")) for s in target_specs}
+        new_specs = [s for s in source_specs if normalize(s.get("name")) not in target_spec_names]
 
         # Environments: name match, exclude Mock Env
-        target_env_names = {e.get("name") for e in target_envs}
+        target_env_names = {normalize(e.get("name")) for e in target_envs}
         new_environments = [
             e for e in source_envs
-            if e.get("name") != "Mock Env" and e.get("name") not in target_env_names
+            if e.get("name") != "Mock Env" and normalize(e.get("name")) not in target_env_names
         ]
 
         if on_progress:

@@ -146,13 +146,19 @@ public class UpdateService {
             List<Environment> targetEnvs = tuple.getT6();
 
             // Specs: name match
-            Set<String> targetSpecNames = targetSpecs.stream().map(Spec::name).collect(Collectors.toSet());
-            List<Spec> newSpecs = sourceSpecs.stream().filter(s -> !targetSpecNames.contains(s.name())).toList();
+            Set<String> targetSpecNames = targetSpecs.stream()
+                    .map(s -> s.name() != null ? s.name().toLowerCase().trim() : "")
+                    .collect(Collectors.toSet());
+            List<Spec> newSpecs = sourceSpecs.stream()
+                    .filter(s -> !targetSpecNames.contains(s.name() != null ? s.name().toLowerCase().trim() : ""))
+                    .toList();
 
             // Environments: name match, exclude Mock Env
-            Set<String> targetEnvNames = targetEnvs.stream().map(Environment::name).collect(Collectors.toSet());
+            Set<String> targetEnvNames = targetEnvs.stream()
+                    .map(e -> e.name() != null ? e.name().toLowerCase().trim() : "")
+                    .collect(Collectors.toSet());
             List<Environment> newEnvs = sourceEnvs.stream()
-                    .filter(e -> !"Mock Env".equals(e.name()) && !targetEnvNames.contains(e.name()))
+                    .filter(e -> !"Mock Env".equals(e.name()) && !targetEnvNames.contains(e.name() != null ? e.name().toLowerCase().trim() : ""))
                     .toList();
 
             // Collections: fork check + name fallback

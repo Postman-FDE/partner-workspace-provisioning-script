@@ -146,14 +146,15 @@ class UpdateService:
         new_collections = await self._find_new_collections(source_collections, target_collections)
 
         # Detect new specs (name match only)
-        target_spec_names = {s.name for s in target_specs}
-        new_specs = [s for s in source_specs if s.name not in target_spec_names]
+        normalize = lambda name: (name or "").lower().strip()
+        target_spec_names = {normalize(s.name) for s in target_specs}
+        new_specs = [s for s in source_specs if normalize(s.name) not in target_spec_names]
 
         # Detect new environments (name match, exclude "Mock Env")
-        target_env_names = {e.name for e in target_envs}
+        target_env_names = {normalize(e.name) for e in target_envs}
         new_environments = [
             e for e in source_envs
-            if e.name != "Mock Env" and e.name not in target_env_names
+            if e.name != "Mock Env" and normalize(e.name) not in target_env_names
         ]
 
         return new_collections, new_specs, new_environments

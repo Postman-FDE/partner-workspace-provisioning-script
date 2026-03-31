@@ -152,14 +152,17 @@ export class UpdateService {
     // Detect new collections (fork check + name fallback)
     const newCollections = await this._findNewCollections(sourceCollections, targetCollections);
 
+    // Normalize names for robust comparison (case-insensitive, trimmed)
+    const normalize = (name) => (name || '').toLowerCase().trim();
+
     // Detect new specs (name match only)
-    const targetSpecNames = new Set(targetSpecs.map(s => s.name));
-    const newSpecs = sourceSpecs.filter(s => !targetSpecNames.has(s.name));
+    const targetSpecNames = new Set(targetSpecs.map(s => normalize(s.name)));
+    const newSpecs = sourceSpecs.filter(s => !targetSpecNames.has(normalize(s.name)));
 
     // Detect new environments (name match, exclude "Mock Env")
-    const targetEnvNames = new Set(targetEnvs.map(e => e.name));
+    const targetEnvNames = new Set(targetEnvs.map(e => normalize(e.name)));
     const newEnvironments = sourceEnvs.filter(
-      e => e.name !== 'Mock Env' && !targetEnvNames.has(e.name)
+      e => e.name !== 'Mock Env' && !targetEnvNames.has(normalize(e.name))
     );
 
     return { newCollections, newSpecs, newEnvironments };
