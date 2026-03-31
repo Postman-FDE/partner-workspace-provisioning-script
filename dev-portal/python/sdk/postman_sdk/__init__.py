@@ -15,6 +15,7 @@ Example:
 from postman_sdk.client.postman_client import PostmanClient
 from postman_sdk.services.provisioning_service import ProvisioningService
 from postman_sdk.services.reset_service import ResetService
+from postman_sdk.services.update_service import UpdateService
 from postman_sdk.services.workspace_service import WorkspaceService
 from postman_sdk.types import (
     # Common
@@ -64,6 +65,7 @@ __all__ = [
     # Services
     "ProvisioningService",
     "ResetService",
+    "UpdateService",
     "WorkspaceService",
     # Common types
     "ApiError",

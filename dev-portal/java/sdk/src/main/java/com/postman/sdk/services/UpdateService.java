@@ -1,7 +1,9 @@
 package com.postman.sdk.services;
 
 import com.postman.sdk.client.PostmanClient;
-import com.postman.sdk.types.*;
+import com.postman.sdk.types.Collection;
+import com.postman.sdk.types.Environment;
+import com.postman.sdk.types.Spec;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -92,30 +94,30 @@ public class UpdateService {
         return client.validateApiKey()
                 .flatMap(user -> detectNewAssets(ctx))
                 .flatMap(detected -> {
-                    if (detected.newCollections.isEmpty() && detected.newSpecs.isEmpty() && detected.newEnvironments.isEmpty()) {
+                    if (detected.newCollections().isEmpty() && detected.newSpecs().isEmpty() && detected.newEnvironments().isEmpty()) {
                         emitProgress(ctx, "complete", "Workspace is up to date — no new assets found.");
                         return Mono.just(ctx.buildResult());
                     }
 
                     emitProgress(ctx, "detection",
                             String.format("Found %d new collection(s), %d new spec(s), %d new environment(s)",
-                                    detected.newCollections.size(), detected.newSpecs.size(), detected.newEnvironments.size()));
+                                    detected.newCollections().size(), detected.newSpecs().size(), detected.newEnvironments().size()));
 
                     Mono<Void> pipeline = Mono.empty();
 
-                    if (!detected.newCollections.isEmpty()) {
-                        pipeline = pipeline.then(forkNewCollections(ctx, detected.newCollections))
+                    if (!detected.newCollections().isEmpty()) {
+                        pipeline = pipeline.then(forkNewCollections(ctx, detected.newCollections()))
                                 .then(createMocks(ctx))
                                 .then(updateMockEnv(ctx))
                                 .then(updateCollectionVariables(ctx));
                     }
 
-                    if (!detected.newSpecs.isEmpty()) {
-                        pipeline = pipeline.then(copyNewSpecs(ctx, detected.newSpecs));
+                    if (!detected.newSpecs().isEmpty()) {
+                        pipeline = pipeline.then(copyNewSpecs(ctx, detected.newSpecs()));
                     }
 
-                    if (!detected.newEnvironments.isEmpty()) {
-                        pipeline = pipeline.then(copyNewEnvironments(ctx, detected.newEnvironments));
+                    if (!detected.newEnvironments().isEmpty()) {
+                        pipeline = pipeline.then(copyNewEnvironments(ctx, detected.newEnvironments()));
                     }
 
                     return pipeline.then(Mono.fromCallable(ctx::buildResult));
