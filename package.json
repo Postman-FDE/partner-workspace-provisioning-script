@@ -6,6 +6,7 @@
   "scripts": {
     "provision": "node cli/provision.js",
     "reset": "node cli/reset.js",
+    "update": "node cli/update.js",
     "provision:help": "echo 'Usage: npm run provision -- --name \"Workspace Name\"'",
     "reset:help": "echo 'Usage: npm run reset -- --workspace-id \"workspace-id\" --confirm'"
   },

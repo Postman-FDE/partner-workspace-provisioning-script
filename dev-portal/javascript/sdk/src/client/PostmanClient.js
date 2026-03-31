@@ -131,6 +131,20 @@ export class PostmanClient {
   }
 
   /**
+   * Update a workspace
+   * @param {string} workspaceId
+   * @param {Object} updates - Fields to update (e.g. { description })
+   * @returns {Promise<{success: boolean, workspace?: Object}>}
+   */
+  async updateWorkspace(workspaceId, updates) {
+    const response = await this.httpClient.put(`/workspaces/${workspaceId}`, { workspace: updates });
+    if (response.success) {
+      return { success: true, workspace: response.data.workspace };
+    }
+    return { success: false, error: response.error };
+  }
+
+  /**
    * Delete a workspace
    * @param {string} workspaceId
    * @returns {Promise<boolean>}

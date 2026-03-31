@@ -340,6 +340,12 @@ const POSTMAN_API_BASE = "https://api.getpostman.com";
 
 const COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url'];
 
+const deriveCompanyName = (workspaceName: string | undefined): string | null => {
+  if (!workspaceName) return null;
+  const match = workspaceName.match(/<>\s*(.+?)\s*Partner\s*Workspace/i);
+  return match ? match[1].trim() : null;
+};
+
 const headers = (): Record<string, string> => ({
   "Content-Type": "application/json",
   "X-Api-Key": POSTMAN_API_KEY ?? "",
@@ -501,6 +507,26 @@ export const getWorkspace = async (workspaceId: string): Promise<object | null> 
   } catch (error) {
     console.error("Error getting workspace:", error);
     return null;
+  }
+};
+
+/**
+ * Update a workspace by ID.
+ */
+export const updateWorkspace = async (
+  workspaceId: string,
+  updates: Record<string, unknown>
+): Promise<{ success: boolean; workspace?: object }> => {
+  try {
+    const response = await axios.put<{ workspace?: object }>(
+      `${POSTMAN_API_BASE}/workspaces/${workspaceId}`,
+      { workspace: updates },
+      { headers: headers() }
+    );
+    return { success: true, workspace: response.data.workspace ?? undefined };
+  } catch (error) {
+    console.error("Error updating workspace:", error);
+    return { success: false };
   }
 };
 
@@ -1640,6 +1666,13 @@ export const resetWorkspace = async (
       }
     }
 
+    // Clear workspace description
+    try {
+      await updateWorkspace(workspaceId, { description: "" });
+    } catch (e: any) {
+      console.warn("Failed to clear workspace description:", e.message);
+    }
+
     onProgress?.({ phase: "complete", message: "Reset complete", result });
     return result;
   } catch (error) {
@@ -1722,6 +1755,31 @@ export const provisionWorkspace = async (
       workspaceId = createResult.workspace?.id;
       results.workspace = createResult.workspace ?? null;
       results.workspaceCreated = true;
+    }
+
+    // Copy workspace description from source
+    try {
+      const sourceDescription = (sourceWorkspace as any)?.description as string | undefined;
+      if (sourceDescription) {
+        let finalDescription = sourceDescription;
+        const companyName = deriveCompanyName(workspaceName || (results.workspace as any)?.name);
+        if (companyName) {
+          finalDescription = sourceDescription.replace(/<Company>/g, companyName);
+          console.log(`Replaced <Company> placeholder with "${companyName}"`);
+        } else {
+          console.warn("Could not derive company name from target workspace name — copying description as-is");
+        }
+        const updateResult = await updateWorkspace(workspaceId!, { description: finalDescription });
+        if (updateResult.success) {
+          console.log("Workspace description updated successfully");
+        } else {
+          console.warn("Failed to update workspace description — continuing provisioning");
+        }
+      } else {
+        console.warn("Source workspace has no description — skipping description copy");
+      }
+    } catch (descError: any) {
+      console.warn(`Unexpected error copying workspace description: ${descError.message} — continuing provisioning`);
     }
 
     // Step 2: Copy Collections (+ extract host variables)
@@ -2282,6 +2340,31 @@ export const provisionCustomWorkspace = async (
       results.workspaceCreated = true;
     }
 
+    // Copy workspace description from source
+    try {
+      const sourceDescription = (sourceWorkspace as any)?.description as string | undefined;
+      if (sourceDescription) {
+        let finalDescription = sourceDescription;
+        const companyName = deriveCompanyName(workspaceName || (results.workspace as any)?.name);
+        if (companyName) {
+          finalDescription = sourceDescription.replace(/<Company>/g, companyName);
+          console.log(`Replaced <Company> placeholder with "${companyName}"`);
+        } else {
+          console.warn("Could not derive company name from target workspace name — copying description as-is");
+        }
+        const updateResult = await updateWorkspace(workspaceId!, { description: finalDescription });
+        if (updateResult.success) {
+          console.log("Workspace description updated successfully");
+        } else {
+          console.warn("Failed to update workspace description — continuing provisioning");
+        }
+      } else {
+        console.warn("Source workspace has no description — skipping description copy");
+      }
+    } catch (descError: any) {
+      console.warn(`Unexpected error copying workspace description: ${descError.message} — continuing provisioning`);
+    }
+
     const customCollectionHostVars = new Map<string, { hostVariables: HostVariableInfo[]; collectionDetails: any }>();
 
     if (copyCollections) {
@@ -2753,6 +2836,13 @@ export const resetCustomWorkspace = async (
         });
         await delay(300);
       }
+    }
+
+    // Clear workspace description
+    try {
+      await updateWorkspace(workspaceId, { description: "" });
+    } catch (e: any) {
+      console.warn("Failed to clear workspace description:", e.message);
     }
 
     onProgress?.({ phase: "complete", message: "Custom reset complete", result });

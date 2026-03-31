@@ -13,6 +13,8 @@ A fully-typed TypeScript SDK for the Postman API with workspace provisioning, re
 - [Reset Functions](#reset-functions)
   - [ResetService.reset()](#resetservicereset---delete-all-or-selected)
   - [ResetService.resetCustom()](#resetserviceresetcustom---delete-specific-items)
+- [Update Functions](#update-functions)
+  - [UpdateService.update()](#updateserviceupdate---detect-and-add-new-assets)
 - [Team & Partner Management](#team--partner-management)
 - [Helper Functions](#helper-functions)
 - [React Integration Examples](#react-integration-examples)
@@ -76,6 +78,7 @@ const workspace = await client.getWorkspace('workspace-id');
 | **Provisioning** | `ProvisioningService.provisionCustom()` | Selective provisioning with options |
 | **Reset** | `ResetService.reset()` | Delete all/selected asset types |
 | **Reset** | `ResetService.resetCustom()` | Delete specific items |
+| **Update** | `UpdateService.update()` | Detect and add new assets from source |
 | **Workspace** | `WorkspaceService.getWorkspace()` | Get workspace details |
 | **Workspace** | `WorkspaceService.createWorkspace()` | Create new workspace |
 | **Workspace** | `WorkspaceService.initializeTargetWorkspace()` | Create or verify workspace |
@@ -268,6 +271,29 @@ const options: CustomResetOptions = {
 };
 
 const result = await resetter.resetCustom('workspace-id', console.log, options);
+```
+
+---
+
+## Update Functions
+
+### `UpdateService.update()` - Detect and Add New Assets
+
+Detects and adds new assets from source to an existing partner workspace without modifying existing assets.
+
+```typescript
+import { PostmanClient, UpdateService, UpdateResult } from '@postman/workspace-sdk';
+
+const client = new PostmanClient({ apiKey: process.env.POSTMAN_API_KEY! });
+const updateService = new UpdateService(client);
+const results: UpdateResult = await updateService.update({
+  sourceWorkspaceId: 'source-id',
+  targetWorkspaceId: 'target-id',
+});
+
+console.log('New collections:', results.newCollections.success);
+console.log('New specs:', results.newSpecs.success);
+console.log('New environments:', results.newEnvironments.success);
 ```
 
 ---
@@ -835,6 +861,20 @@ const client = new PostmanClient({
 | 2 | Mock Servers | Depend on collections |
 | 3 | Environments | Independent |
 | 4 | Collections | Deleted last |
+
+### Update Workflow
+
+Detects and adds new assets from source to an existing partner workspace without modifying existing assets:
+
+| Step | Phase | Description |
+|------|-------|-------------|
+| 1 | Detection | Compare source and target workspaces (fork-check then name-match for collections, name-match for specs/environments) |
+| 2 | Fork Collections | Fork new collections from source to target |
+| 3 | Mock Servers | Create mock servers for each new collection |
+| 4 | Mock Environment | Update existing "Mock Env" in-place with new mock URL variables (or create fresh if not found) |
+| 5 | Collection Variables | PATCH new collection host variables to reference mock env variables |
+| 6 | API Specs | Copy new specification files |
+| 7 | Environments | Copy new environments (excludes "Mock Env") |
 
 ### Rate Limiting
 

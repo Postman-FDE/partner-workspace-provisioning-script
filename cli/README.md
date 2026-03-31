@@ -12,6 +12,7 @@ Command-line tools for interactive Postman workspace provisioning and reset oper
 - [Usage](#usage)
   - [Provisioning a Workspace](#provisioning-a-workspace)
   - [Resetting a Workspace](#resetting-a-workspace)
+  - [Updating a Workspace](#updating-a-workspace)
 - [Configuration Reference](#configuration-reference)
   - [Environment Variables](#environment-variables)
   - [Partner Role Reference](#partner-role-reference)
@@ -27,6 +28,7 @@ The CLI tools provide an interactive way to:
 
 - **Provision** new partner workspaces by copying collections, environments, mocks, and specs from a source workspace
 - **Map mock URLs** with automatic mock environment creation and collection variable updates
+- **Update** existing partner workspaces by detecting and adding new collections, specs, and environments from the source workspace
 - **Reset** existing workspaces by deleting all or selected resources
 - **Manage** team members and partner invitations
 
@@ -39,6 +41,7 @@ These scripts use the same underlying `postmanService.js` module as the SDK pack
 | Use Case | CLI | SDK |
 |----------|-----|-----|
 | One-off workspace provisioning | ✅ | |
+| Update existing workspace | ✅ | |
 | Testing/debugging | ✅ | |
 | Manual operations | ✅ | |
 | Automated pipelines | | ✅ |
@@ -283,6 +286,91 @@ Deleted:
 
 ---
 
+### Updating a Workspace
+
+Run the update script to detect and add new assets from the source workspace to an existing partner workspace.
+
+```bash
+# Using npm script
+npm run update
+
+# Or directly with Node
+node cli/update.js
+```
+
+#### How It Works
+
+1. **Scanning** - Lists all assets in both source and target workspaces
+2. **Detection** - Identifies new collections (via fork-check then name-match), specs, and environments
+3. **Review** - Shows what new assets were found
+4. **Confirmation** - Asks to proceed (unless `--confirm` flag is used)
+5. **Processing** - Forks new collections, creates mocks, updates Mock Env, copies specs and environments
+6. **Summary** - Shows results with new mock URLs
+
+#### Non-Interactive Mode
+
+Skip confirmation prompt:
+
+```bash
+node cli/update.js --confirm
+```
+
+#### Override Workspace IDs
+
+```bash
+node cli/update.js --source "source-workspace-id" --target "target-workspace-id"
+```
+
+#### Example Output
+
+```
+╔══════════════════════════════════════════╗
+║   Partner Workspace Update Detection     ║
+╚══════════════════════════════════════════╝
+
+✓ Authenticated as username
+
+═══ SCANNING WORKSPACES ═══
+
+ℹ Source: 5 collections, 3 specs, 2 environments
+ℹ Target: 3 collections, 2 specs, 2 environments
+ℹ New: 2 collections, 1 specs, 0 environments
+
+Proceed with adding 2 collection(s), 1 spec(s), 0 environment(s)? (y/n) y
+
+═══ FORKING NEW COLLECTIONS ═══
+
+✓ Forked "Payment API" → abc-123
+✓ Forked "Notification Service" → def-456
+
+═══ CREATING MOCK SERVERS ═══
+
+✓ Created "Payment API Mock" → https://xxxxx-mock.postman.com
+✓ Created "Notification Service Mock" → https://yyyyy-mock.postman.com
+
+═══ UPDATING MOCK ENVIRONMENT ═══
+
+✓ Updated Mock Env with 2 new variable(s)
+
+═══ UPDATING COLLECTION VARIABLES ═══
+
+✓ Updated variables for "Payment API"
+✓ Updated variables for "Notification Service"
+
+═══ COPYING NEW SPECS ═══
+
+✓ Copied "Payment OpenAPI" (2 file(s))
+
+═══ UPDATE COMPLETE ═══
+
+✓ Collections added: 2
+✓ Mocks created: 2
+✓ Specs copied: 1
+✓ Environments copied: 0
+```
+
+---
+
 ## Configuration Reference
 
 ### Environment Variables
@@ -319,6 +407,14 @@ Deleted:
 |--------|-------------|
 | `--yes` | Skip confirmation prompt (dangerous!) |
 | `--workspace-id <id>` | Override target workspace ID from `.env` |
+
+#### Update Script (`cli/update.js`)
+
+| Option | Description |
+|--------|-------------|
+| `--confirm` | Skip confirmation prompt |
+| `--source <id>` | Override source workspace ID from `.env` |
+| `--target <id>` | Override target workspace ID from `.env` |
 
 ---
 
@@ -388,6 +484,18 @@ node cli/reset.js --workspace-id "target-workspace-id" --yes
 
 # 2. Re-provision
 npm run provision
+```
+
+### Update After Source Changes
+
+Add new assets to an existing partner workspace after the source workspace has been updated:
+
+```bash
+# Run update to detect and add new assets
+npm run update
+
+# Or with explicit IDs
+node cli/update.js --source "source-id" --target "target-id" --confirm
 ```
 
 ### Automated Provisioning Script

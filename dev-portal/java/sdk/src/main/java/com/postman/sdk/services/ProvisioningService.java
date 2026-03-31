@@ -23,6 +23,7 @@ public class ProvisioningService {
             "baseUrl", "baseurl", "base_url", "HostName", "hostname", "host",
             "apiUrl", "apiurl", "api_url", "serverUrl", "serverurl", "server_url"
     );
+    private static final Pattern COMPANY_NAME_PATTERN = Pattern.compile("<>\\s*(.+?)\\s*Partner\\s*Workspace", Pattern.CASE_INSENSITIVE);
 
     private final PostmanClient client;
     private final SpecService specService;
@@ -44,7 +45,8 @@ public class ProvisioningService {
                 ctx.result.workspaceCreated = config.targetWorkspaceId() == null;
                 ctx.targetWorkspaceId = workspace.id();
 
-                return copyCollections(ctx);
+                return copyWorkspaceDescription(ctx)
+                    .then(copyCollections(ctx));
             })
             .flatMap(v -> createMocks(ctx))
             .flatMap(v -> copyEnvironments(ctx))
@@ -72,6 +74,44 @@ public class ProvisioningService {
             }
             return Mono.error(new RuntimeException("Failed to create workspace: " + result.error()));
         });
+    }
+
+    private static String deriveCompanyName(String workspaceName) {
+        if (workspaceName == null || workspaceName.isEmpty()) return null;
+        Matcher matcher = COMPANY_NAME_PATTERN.matcher(workspaceName);
+        return matcher.find() ? matcher.group(1).trim() : null;
+    }
+
+    private Mono<Void> copyWorkspaceDescription(ProvisioningContext ctx) {
+        return client.getWorkspace(ctx.config.sourceWorkspaceId())
+            .flatMap(sourceWorkspace -> {
+                String sourceDescription = sourceWorkspace.description();
+                if (sourceDescription == null || sourceDescription.isEmpty()) {
+                    System.out.println("WARNING: Source workspace has no description — skipping description copy");
+                    return Mono.<Void>empty();
+                }
+                String finalDescription = sourceDescription;
+                String companyName = deriveCompanyName(ctx.config.targetWorkspaceName());
+                if (companyName != null) {
+                    finalDescription = sourceDescription.replace("<Company>", companyName);
+                    System.out.println("Replaced <Company> placeholder with \"" + companyName + "\"");
+                } else {
+                    System.out.println("WARNING: Could not derive company name from target workspace name — copying description as-is");
+                }
+                return client.updateWorkspace(ctx.targetWorkspaceId, Map.of("description", finalDescription))
+                    .doOnNext(result -> {
+                        if (Boolean.TRUE.equals(result.get("success"))) {
+                            System.out.println("Workspace description updated successfully");
+                        } else {
+                            System.out.println("WARNING: Failed to update workspace description — continuing provisioning");
+                        }
+                    })
+                    .then();
+            })
+            .onErrorResume(e -> {
+                System.out.println("WARNING: Unexpected error copying workspace description: " + e.getMessage() + " — continuing provisioning");
+                return Mono.empty();
+            });
     }
 
     private Mono<Void> copyCollections(ProvisioningContext ctx) {

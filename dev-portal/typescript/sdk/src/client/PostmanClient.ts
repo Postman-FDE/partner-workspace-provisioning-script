@@ -125,6 +125,24 @@ export class PostmanClient {
   }
 
   /**
+   * Update a workspace
+   */
+  async updateWorkspace(
+    workspaceId: string,
+    updates: Record<string, unknown>,
+  ): Promise<{ success: boolean; workspace?: Workspace }> {
+    try {
+      const response = await this.http.put<{ workspace: Workspace }>(`/workspaces/${workspaceId}`, {
+        workspace: updates,
+      });
+      return { success: true, workspace: response.workspace };
+    } catch (error) {
+      console.error('Error updating workspace:', getErrorMessage(error));
+      return { success: false };
+    }
+  }
+
+  /**
    * Delete a workspace
    */
   async deleteWorkspace(workspaceId: string): Promise<boolean> {

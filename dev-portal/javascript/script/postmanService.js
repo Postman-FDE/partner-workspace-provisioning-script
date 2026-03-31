@@ -15,6 +15,12 @@ const POSTMAN_API_BASE = "https://api.getpostman.com";
 
 const COMMON_HOST_VAR_NAMES = ['baseUrl', 'baseurl', 'base_url', 'HostName', 'hostname', 'host', 'apiUrl', 'apiurl', 'api_url', 'serverUrl', 'serverurl', 'server_url'];
 
+const deriveCompanyName = (workspaceName) => {
+  if (!workspaceName) return null;
+  const match = workspaceName.match(/<>\s*(.+?)\s*Partner\s*Workspace/i);
+  return match ? match[1].trim() : null;
+};
+
 const headers = () => ({
   "Content-Type": "application/json",
   "X-Api-Key": POSTMAN_API_KEY || "",
@@ -159,6 +165,26 @@ export const getWorkspace = async (workspaceId) => {
   } catch (error) {
     console.error("Error getting workspace:", error);
     return null;
+  }
+};
+
+/**
+ * Update a workspace by ID.
+ * @param {string} workspaceId
+ * @param {object} updates - Fields to update (e.g. { description })
+ * @returns {Promise<{success: boolean, workspace?: object}>}
+ */
+export const updateWorkspace = async (workspaceId, updates) => {
+  try {
+    const response = await axios.put(
+      `${POSTMAN_API_BASE}/workspaces/${workspaceId}`,
+      { workspace: updates },
+      { headers: headers() }
+    );
+    return { success: true, workspace: response.data.workspace };
+  } catch (error) {
+    console.error("Error updating workspace:", extractError(error));
+    return { success: false };
   }
 };
 
@@ -1051,6 +1077,13 @@ export const resetWorkspace = async (workspaceId, onProgress, options = {}) => {
       }
     }
 
+    // Clear workspace description
+    try {
+      await updateWorkspace(workspaceId, { description: "" });
+    } catch (e) {
+      console.warn("Failed to clear workspace description:", e.message);
+    }
+
     onProgress?.({ phase: "complete", message: "Reset complete", result });
     return result;
   } catch (error) {
@@ -1115,6 +1148,31 @@ export const provisionWorkspace = async (options, onProgress) => {
       workspaceId = createResult.workspace.id;
       results.workspace = createResult.workspace;
       results.workspaceCreated = true;
+    }
+
+    // Copy workspace description from source
+    try {
+      const sourceDescription = sourceWorkspace.description;
+      if (sourceDescription) {
+        let finalDescription = sourceDescription;
+        const companyName = deriveCompanyName(workspaceName || results.workspace?.name);
+        if (companyName) {
+          finalDescription = sourceDescription.replace(/<Company>/g, companyName);
+          console.log(`Replaced <Company> placeholder with "${companyName}"`);
+        } else {
+          console.warn("Could not derive company name from target workspace name — copying description as-is");
+        }
+        const updateResult = await updateWorkspace(workspaceId, { description: finalDescription });
+        if (updateResult.success) {
+          console.log("Workspace description updated successfully");
+        } else {
+          console.warn("Failed to update workspace description — continuing provisioning");
+        }
+      } else {
+        console.warn("Source workspace has no description — skipping description copy");
+      }
+    } catch (descError) {
+      console.warn(`Unexpected error copying workspace description: ${descError.message} — continuing provisioning`);
     }
 
     // Step 2: Copy Collections
@@ -1327,6 +1385,277 @@ export const quickProvision = async (sourceWorkspaceId, workspaceName, options =
 };
 
 // ============================================================================
+// UPDATE OPERATIONS
+// ============================================================================
+
+/**
+ * Update a target workspace by detecting and adding net-new assets from source.
+ * Detects new collections (fork check + name fallback), specs (name match),
+ * and environments (name match, excluding "Mock Env"). Forks new collections,
+ * creates mock servers, updates Mock Env in-place with dedup, updates collection
+ * variables, and copies new specs and environments.
+ *
+ * @param {object} options - { sourceWorkspaceId, targetWorkspaceId, onProgress }
+ * @returns {Promise<object>} Update results
+ */
+export const updateWorkspaceAssets = async ({ sourceWorkspaceId, targetWorkspaceId, onProgress }) => {
+  if (!POSTMAN_API_KEY) throw new Error("Postman API key not configured");
+  if (!sourceWorkspaceId) throw new Error("Source workspace ID is required");
+  if (!targetWorkspaceId) throw new Error("Target workspace ID is required");
+
+  const results = {
+    collections: { total: 0, success: 0, failed: [], successData: [] },
+    mocks: { total: 0, success: 0, failed: [], urls: [] },
+    mockEnv: { success: false, action: null },
+    specs: { total: 0, success: 0, failed: [], successData: [] },
+    environments: { total: 0, success: 0, failed: [], successData: [] },
+    errors: [],
+  };
+
+  try {
+    // Step 1: Detect new assets
+    onProgress?.({ phase: "detection", message: "Scanning workspaces for new assets...", progress: 5 });
+
+    const [sourceColls, targetColls, sourceSpecs, targetSpecs, sourceEnvs, targetEnvs] = await Promise.all([
+      getAllCollections(sourceWorkspaceId),
+      getAllCollections(targetWorkspaceId),
+      getAllSpecs(sourceWorkspaceId),
+      getAllSpecs(targetWorkspaceId),
+      getAllEnvironments(sourceWorkspaceId),
+      getAllEnvironments(targetWorkspaceId),
+    ]);
+
+    // Collections: fork check + name fallback
+    const targetForkSources = new Set();
+    const targetNames = new Set();
+    for (const tc of targetColls) {
+      targetNames.add(tc.name);
+      try {
+        const details = await getCollectionDetails(tc.uid);
+        const forkFrom = details?.fork?.from;
+        if (forkFrom) targetForkSources.add(forkFrom);
+      } catch { /* ignore */ }
+      await delay(300);
+    }
+    const newCollections = sourceColls.filter(sc => !targetForkSources.has(sc.uid) && !targetNames.has(sc.name));
+
+    // Specs: name match
+    const targetSpecNames = new Set(targetSpecs.map(s => s.name));
+    const newSpecs = sourceSpecs.filter(s => !targetSpecNames.has(s.name));
+
+    // Environments: name match, exclude Mock Env
+    const targetEnvNames = new Set(targetEnvs.map(e => e.name));
+    const newEnvironments = sourceEnvs.filter(e => e.name !== 'Mock Env' && !targetEnvNames.has(e.name));
+
+    onProgress?.({ phase: "detection", message: `Found ${newCollections.length} new collection(s), ${newSpecs.length} new spec(s), ${newEnvironments.length} new environment(s)`, progress: 15 });
+
+    if (newCollections.length === 0 && newSpecs.length === 0 && newEnvironments.length === 0) {
+      onProgress?.({ phase: "complete", message: "Workspace is up to date — no new assets found.", progress: 100, results });
+      return results;
+    }
+
+    // Step 2: Fork new collections
+    onProgress?.({ phase: "collections", message: "Forking new collections...", progress: 20 });
+    results.collections.total = newCollections.length;
+    const collectionMap = new Map();
+
+    for (let i = 0; i < newCollections.length; i++) {
+      const collection = newCollections[i];
+      onProgress?.({ phase: "collections", message: `Forking: ${collection.name}`, current: i + 1, total: newCollections.length, progress: 20 + (i / newCollections.length) * 15 });
+      const forkResult = await forkCollection(collection.uid, collection.name, targetWorkspaceId);
+      if (forkResult.success) {
+        results.collections.success++;
+        const collDetails = await getCollectionDetails(forkResult.uid);
+        const hostVariables = collDetails ? extractHostVariables(collDetails) : [];
+        results.collections.successData.push({
+          name: forkResult.collectionName, uid: forkResult.uid,
+          hostVariables, collectionDetails: collDetails,
+        });
+        collectionMap.set(collection.uid, forkResult.uid);
+      } else {
+        results.collections.failed.push({ name: collection.name, error: forkResult.error });
+        results.errors.push(`Failed to fork ${collection.name}: ${forkResult.error}`);
+      }
+      await delay(300);
+    }
+
+    // Step 3: Create mock servers for new collections
+    if (results.collections.successData.length > 0) {
+      onProgress?.({ phase: "mocks", message: "Creating mock servers...", progress: 40 });
+      results.mocks.total = results.collections.successData.length;
+      for (let i = 0; i < results.collections.successData.length; i++) {
+        const coll = results.collections.successData[i];
+        const mockName = `${coll.name} Mock`;
+        onProgress?.({ phase: "mocks", message: `Creating: ${mockName}`, current: i + 1, total: results.collections.successData.length, progress: 40 + (i / results.collections.successData.length) * 15 });
+        const mockResult = await createMockServer(mockName, coll.uid, targetWorkspaceId, null);
+        if (mockResult.success) {
+          results.mocks.success++;
+          results.mocks.urls.push({
+            collectionName: coll.name, mockName: mockResult.mockName,
+            mockUrl: mockResult.mockUrl, targetUid: coll.uid,
+            hostVariables: coll.hostVariables,
+          });
+        } else {
+          results.mocks.failed.push({ name: mockName, error: mockResult.error });
+          results.errors.push(`Failed to create mock ${mockName}: ${mockResult.error}`);
+        }
+        await delay(300);
+      }
+    }
+
+    // Step 4: Update Mock Env in-place (or create if missing)
+    const mockEnvVarMap = new Map();
+    if (results.mocks.urls.length > 0) {
+      onProgress?.({ phase: "mockEnv", message: "Updating Mock Environment...", progress: 60 });
+
+      const toCamelCase = (name) => {
+        return name.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/)
+          .map((word, i) => i === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join('');
+      };
+
+      const newVariables = [];
+      for (const mock of results.mocks.urls) {
+        const hostVars = mock.hostVariables || [];
+        if (hostVars.length === 0) {
+          const varName = toCamelCase(mock.collectionName) + 'BaseUrl';
+          newVariables.push({ key: varName, value: mock.mockUrl, type: 'default', enabled: true });
+          mockEnvVarMap.set(`${mock.targetUid}:__fallback__`, varName);
+        } else {
+          for (const hv of hostVars) {
+            const envVarName = toCamelCase(mock.collectionName) + toPascalCase(hv.varName);
+            newVariables.push({ key: envVarName, value: mock.mockUrl, type: 'default', enabled: true });
+            mockEnvVarMap.set(`${mock.targetUid}:${hv.varName}`, envVarName);
+          }
+        }
+      }
+
+      if (newVariables.length > 0) {
+        const mockEnv = targetEnvs.find(e => e.name === 'Mock Env');
+        if (mockEnv) {
+          // Update existing Mock Env in-place with deduplication
+          const envDetails = await getEnvironmentDetails(mockEnv.uid);
+          const existingVars = envDetails?.values || [];
+          const existingKeys = new Set(existingVars.map(v => v.key));
+
+          const deduped = newVariables.map(v => {
+            if (existingKeys.has(v.key)) {
+              let suffix = 2;
+              let newKey = `${v.key}${suffix}`;
+              while (existingKeys.has(newKey)) { suffix++; newKey = `${v.key}${suffix}`; }
+              existingKeys.add(newKey);
+              for (const [mapKey, mapVal] of mockEnvVarMap.entries()) {
+                if (mapVal === v.key) mockEnvVarMap.set(mapKey, newKey);
+              }
+              return { ...v, key: newKey };
+            }
+            existingKeys.add(v.key);
+            return v;
+          });
+
+          const merged = [...existingVars, ...deduped];
+          const updateResult = await updateEnvironment(mockEnv.uid, 'Mock Env', merged);
+          results.mockEnv = { success: updateResult.success, action: 'updated' };
+          if (!updateResult.success) results.errors.push(`Failed to update Mock Env: ${updateResult.error}`);
+        } else {
+          // Create fresh Mock Env
+          const createResult = await createEnvironmentInPostman('Mock Env', newVariables, targetWorkspaceId);
+          results.mockEnv = { success: createResult.success, action: 'created' };
+          if (!createResult.success) results.errors.push(`Failed to create Mock Env: ${createResult.error}`);
+        }
+      }
+    }
+
+    // Step 5: Update collection variables to reference mock env var names
+    if (mockEnvVarMap.size > 0) {
+      onProgress?.({ phase: "collectionVars", message: "Updating collection variables...", progress: 70 });
+      for (const coll of results.collections.successData) {
+        if (!coll.collectionDetails) continue;
+        const existingVars = coll.collectionDetails.variable || [];
+        const hostVars = coll.hostVariables || [];
+
+        if (hostVars.length > 0) {
+          const updatedVars = existingVars.map(v => {
+            const hv = hostVars.find(h => h.varName === v.key);
+            if (hv) {
+              const envName = mockEnvVarMap.get(`${coll.uid}:${hv.varName}`);
+              if (envName) return { ...v, value: `{{${envName}}}` };
+            }
+            return v;
+          });
+          for (const hv of hostVars) {
+            const envName = mockEnvVarMap.get(`${coll.uid}:${hv.varName}`);
+            if (envName && !updatedVars.some(v => v.key === hv.varName)) {
+              updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
+            }
+          }
+          await patchCollectionVariables(coll.uid, updatedVars);
+        } else {
+          const fallbackEnvVarName = mockEnvVarMap.get(`${coll.uid}:__fallback__`);
+          if (!fallbackEnvVarName) continue;
+          const matchedVar = existingVars.find(v => COMMON_HOST_VAR_NAMES.includes(v.key));
+          const updatedVars = matchedVar
+            ? existingVars.map(v => v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v)
+            : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvVarName}}}`, type: 'string' }];
+          await patchCollectionVariables(coll.uid, updatedVars);
+        }
+        await delay(300);
+      }
+    }
+
+    // Step 6: Copy new specs
+    if (newSpecs.length > 0) {
+      onProgress?.({ phase: "specs", message: "Copying new specs...", progress: 80 });
+      results.specs.total = newSpecs.length;
+      for (let i = 0; i < newSpecs.length; i++) {
+        const spec = newSpecs[i];
+        onProgress?.({ phase: "specs", message: `Copying: ${spec.name}`, current: i + 1, total: newSpecs.length, progress: 80 + (i / newSpecs.length) * 10 });
+        const copyResult = await copySpec(spec.id, spec.name, spec.type, targetWorkspaceId);
+        if (copyResult.success) {
+          results.specs.success++;
+          results.specs.successData.push({ name: copyResult.specName, id: copyResult.newSpecId, filesCopied: copyResult.filesCopied });
+        } else {
+          results.specs.failed.push({ name: spec.name, error: copyResult.errors.join("; ") });
+          results.errors.push(`Failed to copy spec ${spec.name}`);
+        }
+        await delay(500);
+      }
+    }
+
+    // Step 7: Copy new environments
+    if (newEnvironments.length > 0) {
+      onProgress?.({ phase: "environments", message: "Copying new environments...", progress: 90 });
+      results.environments.total = newEnvironments.length;
+      for (let i = 0; i < newEnvironments.length; i++) {
+        const env = newEnvironments[i];
+        onProgress?.({ phase: "environments", message: `Copying: ${env.name}`, current: i + 1, total: newEnvironments.length, progress: 90 + (i / newEnvironments.length) * 9 });
+        const envDetails = await getEnvironmentDetails(env.uid);
+        if (!envDetails) {
+          results.environments.failed.push({ name: env.name, error: "Could not get environment details" });
+          continue;
+        }
+        const createResult = await createEnvironmentInPostman(envDetails.name, envDetails.values || [], targetWorkspaceId);
+        if (createResult.success) {
+          results.environments.success++;
+          results.environments.successData.push({ name: createResult.environmentName, uid: createResult.uid });
+        } else {
+          results.environments.failed.push({ name: envDetails.name, error: createResult.error });
+          results.errors.push(`Failed to copy environment ${envDetails.name}: ${createResult.error}`);
+        }
+        await delay(300);
+      }
+    }
+
+    onProgress?.({ phase: "complete", message: "Update complete!", progress: 100, results });
+    return results;
+  } catch (error) {
+    results.errors.push(error.message);
+    onProgress?.({ phase: "error", message: `Error: ${error.message}`, progress: 0, results });
+    throw error;
+  }
+};
+
+// ============================================================================
 // CONFIGURATION & UTILITIES
 // ============================================================================
 
@@ -1487,6 +1816,31 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
       workspaceId = createResult.workspace.id;
       results.workspace = createResult.workspace;
       results.workspaceCreated = true;
+    }
+
+    // Copy workspace description from source
+    try {
+      const sourceDescription = sourceWorkspace.description;
+      if (sourceDescription) {
+        let finalDescription = sourceDescription;
+        const companyName = deriveCompanyName(workspaceName || results.workspace?.name);
+        if (companyName) {
+          finalDescription = sourceDescription.replace(/<Company>/g, companyName);
+          console.log(`Replaced <Company> placeholder with "${companyName}"`);
+        } else {
+          console.warn("Could not derive company name from target workspace name — copying description as-is");
+        }
+        const updateResult = await updateWorkspace(workspaceId, { description: finalDescription });
+        if (updateResult.success) {
+          console.log("Workspace description updated successfully");
+        } else {
+          console.warn("Failed to update workspace description — continuing provisioning");
+        }
+      } else {
+        console.warn("Source workspace has no description — skipping description copy");
+      }
+    } catch (descError) {
+      console.warn(`Unexpected error copying workspace description: ${descError.message} — continuing provisioning`);
     }
 
     if (copyCollections) {
@@ -1730,6 +2084,13 @@ export const resetCustomWorkspace = async (workspaceId, onProgress, options = {}
         onProgress?.({ phase: "collections", deleted: result.deletedCollections, total: collections.length, currentItem: coll.name });
         await delay(300);
       }
+    }
+
+    // Clear workspace description
+    try {
+      await updateWorkspace(workspaceId, { description: "" });
+    } catch (e) {
+      console.warn("Failed to clear workspace description:", e.message);
     }
 
     onProgress?.({ phase: "complete", message: "Custom reset complete", result });

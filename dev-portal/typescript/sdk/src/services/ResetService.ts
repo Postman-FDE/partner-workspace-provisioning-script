@@ -129,6 +129,13 @@ export class ResetService {
     this.emitProgress('collections', `Deleting ${contents.collections.length} collection(s)...`);
     await this.deleteCollections(contents.collections, result);
 
+    // Clear workspace description
+    try {
+      await this.client.updateWorkspace(this.config.workspaceId, { description: '' });
+    } catch (e: any) {
+      console.warn('Failed to clear workspace description:', e.message);
+    }
+
     this.emitProgress('complete', 'Reset complete');
     return result;
   }

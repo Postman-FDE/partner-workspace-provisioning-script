@@ -115,6 +115,9 @@ export class ProvisioningService {
     result.workspaceCreated = workspaceResult.isNew;
     const targetWorkspaceId = workspaceResult.workspace.id;
 
+    // Copy workspace description from source
+    await this.copyWorkspaceDescription(targetWorkspaceId);
+
     // Step 2: Copy collections
     this.emitProgress('collections', 'Copying collections...');
     await this.copyCollections(targetWorkspaceId, result);
@@ -186,6 +189,39 @@ export class ProvisioningService {
     });
 
     return { ...result, isNew: true };
+  }
+
+  private deriveCompanyName(workspaceName: string | undefined): string | null {
+    if (!workspaceName) return null;
+    const match = workspaceName.match(/<>\s*(.+?)\s*Partner\s*Workspace/i);
+    return match ? match[1].trim() : null;
+  }
+
+  private async copyWorkspaceDescription(targetWorkspaceId: string): Promise<void> {
+    try {
+      const sourceWorkspace = await this.client.getWorkspace(this.config.sourceWorkspaceId);
+      const sourceDescription = (sourceWorkspace as any)?.description as string | undefined;
+      if (!sourceDescription) {
+        console.warn('Source workspace has no description — skipping description copy');
+        return;
+      }
+      let finalDescription = sourceDescription;
+      const companyName = this.deriveCompanyName(this.config.targetWorkspaceName);
+      if (companyName) {
+        finalDescription = sourceDescription.replace(/<Company>/g, companyName);
+        console.log(`Replaced <Company> placeholder with "${companyName}"`);
+      } else {
+        console.warn('Could not derive company name from target workspace name — copying description as-is');
+      }
+      const updateResult = await this.client.updateWorkspace(targetWorkspaceId, { description: finalDescription });
+      if (updateResult.success) {
+        console.log('Workspace description updated successfully');
+      } else {
+        console.warn('Failed to update workspace description — continuing provisioning');
+      }
+    } catch (err: any) {
+      console.warn(`Unexpected error copying workspace description: ${err.message} — continuing provisioning`);
+    }
   }
 
   private async copyCollections(targetWorkspaceId: string, result: ProvisioningResult): Promise<void> {

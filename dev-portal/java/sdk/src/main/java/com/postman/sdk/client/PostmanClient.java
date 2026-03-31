@@ -111,6 +111,27 @@ public class PostmanClient {
             .onErrorResume(e -> Mono.just(ApiResponse.failure(getErrorMessage(e))));
     }
 
+    /**
+     * Update workspace via PUT /workspaces/{workspaceId}
+     */
+    public Mono<Map<String, Object>> updateWorkspace(String workspaceId, Map<String, Object> updates) {
+        return webClient.put()
+            .uri("/workspaces/{id}", workspaceId)
+            .bodyValue(Map.of("workspace", updates))
+            .retrieve()
+            .bodyToMono(Map.class)
+            .map(response -> {
+                Map<String, Object> result = new java.util.HashMap<>();
+                result.put("success", true);
+                result.put("workspace", response.get("workspace"));
+                return result;
+            })
+            .onErrorResume(e -> {
+                System.err.println("Error updating workspace: " + e.getMessage());
+                return Mono.just(Map.of("success", false));
+            });
+    }
+
     // =========================================================================
     // COLLECTIONS
     // =========================================================================

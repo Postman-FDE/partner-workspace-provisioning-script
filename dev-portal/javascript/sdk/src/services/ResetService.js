@@ -138,6 +138,13 @@ export class ResetService {
         await this._deleteCollections(contents.collections, result, onProgress);
       }
 
+      // Clear workspace description
+      try {
+        await this.client.updateWorkspace(workspaceId, { description: '' });
+      } catch (e) {
+        console.warn('Failed to clear workspace description:', e.message);
+      }
+
       this._emitProgress(onProgress, 'complete', 'Reset complete!');
 
     } catch (error) {
@@ -219,6 +226,13 @@ export class ResetService {
       if (collectionsToDelete.length > 0) {
         this._emitProgress(onProgress, 'collections', `Deleting ${collectionsToDelete.length} collection(s)...`);
         await this._deleteCollections(collectionsToDelete, result, onProgress);
+      }
+
+      // Clear workspace description
+      try {
+        await this.client.updateWorkspace(workspaceId, { description: '' });
+      } catch (e) {
+        console.warn('Failed to clear workspace description:', e.message);
       }
 
       this._emitProgress(onProgress, 'complete', 'Reset complete!');
