@@ -53,6 +53,22 @@ Deletes workspace resources in reverse dependency order:
 3. Delete Environments
 4. Delete Collections
 
+### Update Workflow
+
+Detects and adds new assets from the source workspace to an existing partner workspace — without modifying existing assets:
+
+```
+1. Scan & Detect           → Compare source and target workspaces for differences
+2. Fork New Collections    → Fork only net-new collections to target workspace
+3. Create Mock Servers     → Generate mock servers for each new collection
+4. Update Mock Env         → Add new mock URL variables to existing "Mock Env" (in-place)
+5. Update Collection Vars  → Map new collection host variables to mock env references
+6. Copy New API Specs      → Transfer new specification files
+7. Copy New Environments   → Duplicate new environment configurations
+```
+
+> **Detection Strategy**: Collections are matched by fork-relationship first (checking `fork.from` metadata), then by name as a fallback. Specs and environments are matched by name only. "Mock Env" is excluded from environment matching since it's managed separately.
+
 ---
 
 ## Features
@@ -78,6 +94,13 @@ Deletes workspace resources in reverse dependency order:
 - Selective deletion options
 - Detailed error reporting
 
+### Workspace Update Detection
+- Scan source and target workspaces to detect net-new collections, specs, and environments
+- Fork-relationship matching (primary) with name-match fallback for collection detection
+- Existing "Mock Env" updated in-place with new mock URL variables (not recreated)
+- New collection variables automatically wired to reference mock env
+- Additive only — existing assets are never modified or removed
+
 ### Robust Error Handling
 - Detailed error logging
 - Progress callbacks
@@ -97,9 +120,10 @@ Interactive command-line tools for manual workspace provisioning and reset. Run 
 ```bash
 npm run provision    # Interactive provisioning
 npm run reset        # Interactive reset
+npm run update       # Detect and add new assets
 ```
 
-Best for one-off operations, testing, and debugging. See the [CLI documentation](cli/README.md) for full details on both `provision.js` and `reset.js`.
+Best for one-off operations, testing, and debugging. See the [CLI documentation](cli/README.md) for full details on `provision.js`, `reset.js`, and `update.js`.
 
 ### Dev Portal — Standalone Scripts
 
@@ -144,6 +168,7 @@ See the [Dev Portal documentation](dev-portal/README.md) for a full comparison o
 | Custom Provisioning | ✅ | ✅ | ✅ | ✅ |
 | Full Reset | ✅ | ✅ | ✅ | ✅ |
 | Custom Reset | ✅ | ✅ | ✅ | ✅ |
+| Update Detection | ✅ | ✅ | ✅ | ✅ |
 | Partner Invitations | ✅ | ✅ | ✅ | ✅ |
 | Admin Management | ✅ | ✅ | ✅ | ✅ |
 | Progress Callbacks | ✅ | ✅ | ✅ | ✅ |
@@ -320,7 +345,8 @@ All SDKs and scripts use the same environment variables for configuration:
 │       ▼             ▼             ▼             ▼               │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │                    Service Layer                         │   │
-│  │  • ProvisioningService  • ResetService  • WorkspaceService│  │
+│  │  • ProvisioningService  • ResetService  • UpdateService   │  │
+│  │  • WorkspaceService                                       │  │
 │  └─────────────────────────────────────────────────────────┘   │
 │       │                                                         │
 │       ▼                                                         │
@@ -379,6 +405,20 @@ The reset follows reverse order to handle dependencies:
 | 3 | Environments | Independent |
 | 4 | Collections | Deleted last |
 
+### Update Order
+
+The update detects new assets and adds them with full mock wiring:
+
+| Step | Phase | Description |
+|------|-------|-------------|
+| 1 | Detection | Scan both workspaces; identify new collections (fork-check → name-match), specs, and environments |
+| 2 | Fork Collections | Fork only net-new collections to target workspace |
+| 3 | Mock Servers | Create mock server for each new collection |
+| 4 | Mock Environment | Append new mock URL variables to existing "Mock Env" (or create fresh) |
+| 5 | Collection Variables | PATCH new collection host vars to reference mock env vars |
+| 6 | API Specs | Copy new specification files |
+| 7 | Environments | Copy new environments (excluding "Mock Env") |
+
 ### Rate Limiting
 
 All SDKs and scripts include automatic delays between API calls:
@@ -394,14 +434,22 @@ All SDKs and scripts include automatic delays between API calls:
 
 ---
 
-## Original Source Reference
+## Reference Materials
 
-The original single-file implementation is preserved in [`postmanService.js`](postmanService.js) for reference and traceability. This file contains all the original API functions before they were modularized into the multi-language SDKs and standalone scripts.
+Original source files and API references are preserved in the [`reference/`](reference/) directory for traceability:
+
+| File | Description |
+|------|-------------|
+| [`postmanService.js`](reference/postmanService.js) | Original single-file implementation (before multi-language modularization) |
+| [`OG_README.md`](reference/OG_README.md) | Original README documenting the single-file approach |
+| [`postman-api.yaml`](reference/postman-api.yaml) | Postman API OpenAPI specification |
+| [`Postman API.postman_collection.json`](reference/Postman%20API.postman_collection.json) | Postman API collection |
+| [`PW Auto Provisioning.postman_collection.json`](reference/PW%20Auto%20Provisioning.postman_collection.json) | Auto-provisioning workflow collection |
 
 ### Relationship to Dev Portal
 
 ```
-postmanService.js (original)
+reference/postmanService.js (original)
     │
     ├── dev-portal/javascript/
     │     ├── script/    (cleaned-up single-file JS)
@@ -426,7 +474,8 @@ fde-pw-creation-script/
 ├── cli/                              # CLI scripts (interactive terminal)
 │   ├── README.md
 │   ├── provision.js
-│   └── reset.js
+│   ├── reset.js
+│   └── update.js
 ├── dev-portal/                       # Multi-language tools
 │   ├── README.md                     # Dev portal overview
 │   ├── javascript/
@@ -441,9 +490,12 @@ fde-pw-creation-script/
 │   └── java/
 │       ├── script/                   # Drag-and-drop standalone script
 │       └── sdk/                      # Modular Java SDK
-├── postmanService.js                 # Original source (preserved)
-├── provision.js                      # Root provision entry point
-├── reset.js                          # Root reset entry point
+├── reference/                        # Original source & API references
+│   ├── postmanService.js             # Original single-file implementation
+│   ├── OG_README.md                  # Original README
+│   ├── postman-api.yaml              # Postman API OpenAPI spec
+│   ├── Postman API.postman_collection.json
+│   └── PW Auto Provisioning.postman_collection.json
 ├── package.json                      # Root package config
 └── README.md                         # This file
 ```
