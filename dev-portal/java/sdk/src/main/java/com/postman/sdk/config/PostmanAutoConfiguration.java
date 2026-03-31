@@ -1,6 +1,8 @@
 package com.postman.sdk.config;
 
 import com.postman.sdk.client.PostmanClient;
+import com.postman.sdk.services.SpecService;
+import com.postman.sdk.services.UpdateService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -30,5 +32,17 @@ public class PostmanAutoConfiguration {
     @ConditionalOnMissingBean
     public PostmanClient postmanClient(WebClient postmanWebClient, PostmanClientConfig config) {
         return new PostmanClient(postmanWebClient, config);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public SpecService specService(PostmanClient postmanClient) {
+        return new SpecService(postmanClient);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public UpdateService updateService(PostmanClient postmanClient, SpecService specService) {
+        return new UpdateService(postmanClient, specService);
     }
 }
