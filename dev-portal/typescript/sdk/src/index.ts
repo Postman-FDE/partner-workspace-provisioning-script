@@ -37,10 +37,13 @@ export {
   WorkspaceService,
   ProvisioningService,
   ResetService,
+  UpdateService,
   type WorkspaceServiceConfig,
   type ProvisioningConfig,
   type ProvisioningResult,
   type ResetConfig,
   type ResetResult,
   type WorkspaceContents,
+  type UpdateConfig,
+  type UpdateResult,
 } from './services';
