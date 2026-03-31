@@ -13,6 +13,8 @@ A fully-typed Python SDK for the Postman API with async/await support, Pydantic 
 - [Reset Functions](#reset-functions)
   - [ResetService.reset()](#resetservicereset---delete-all-or-selected)
   - [ResetService.reset_custom()](#resetservicereset_custom---delete-specific-items)
+- [Update Functions](#update-functions)
+  - [UpdateService.update()](#updateserviceupdate---detect-and-add-new-assets)
 - [Team & Partner Management](#team--partner-management)
 - [Helper Functions](#helper-functions)
 - [FastAPI Integration Examples](#fastapi-integration-examples)
@@ -79,6 +81,7 @@ asyncio.run(main())
 | **Provisioning** | `ProvisioningService.provision_custom()` | Selective provisioning with options |
 | **Reset** | `ResetService.reset()` | Delete all/selected asset types |
 | **Reset** | `ResetService.reset_custom()` | Delete specific items |
+| **Update** | `UpdateService.update()` | Detect and add new assets from source |
 | **Workspace** | `WorkspaceService.get_workspace()` | Get workspace details |
 | **Workspace** | `WorkspaceService.create_workspace()` | Create new workspace |
 | **Workspace** | `WorkspaceService.initialize_target_workspace()` | Create or verify workspace |
@@ -303,6 +306,29 @@ async def reset_specific_collections():
         print(f"Deleted {result.collections.deleted} test collections")
 
 asyncio.run(reset_specific_collections())
+```
+
+---
+
+## Update Functions
+
+### `UpdateService.update()` - Detect and Add New Assets
+
+Detects and adds new assets from source to an existing partner workspace without modifying existing assets.
+
+```python
+from postman_sdk import PostmanClient, UpdateService
+
+async with PostmanClient(api_key="your-api-key") as client:
+    update_service = UpdateService(
+        client=client,
+        source_workspace_id="source-id",
+        target_workspace_id="target-id",
+    )
+    results = await update_service.update()
+    print(f"New collections: {results['new_collections']['success']}")
+    print(f"New specs: {results['new_specs']['success']}")
+    print(f"New environments: {results['new_environments']['success']}")
 ```
 
 ---
@@ -963,6 +989,20 @@ async with PostmanClient(
 | 2 | Mock Servers | Depend on collections |
 | 3 | Environments | Independent |
 | 4 | Collections | Deleted last |
+
+### Update Workflow
+
+Detects and adds new assets from source to an existing partner workspace without modifying existing assets:
+
+| Step | Phase | Description |
+|------|-------|-------------|
+| 1 | Detection | Compare source and target workspaces (fork-check then name-match for collections, name-match for specs/environments) |
+| 2 | Fork Collections | Fork new collections from source to target |
+| 3 | Mock Servers | Create mock servers for each new collection |
+| 4 | Mock Environment | Update existing "Mock Env" in-place with new mock URL variables (or create fresh if not found) |
+| 5 | Collection Variables | PATCH new collection host variables to reference mock env variables |
+| 6 | API Specs | Copy new specification files |
+| 7 | Environments | Copy new environments (excludes "Mock Env") |
 
 ### Rate Limiting
 

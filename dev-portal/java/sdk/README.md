@@ -13,6 +13,8 @@ A Spring Boot-based Java SDK for the Postman API with reactive WebClient, Java 1
 - [Reset Functions](#reset-functions)
   - [ResetService.reset()](#resetservicereset---delete-all-or-selected)
   - [ResetService.resetCustom()](#resetserviceresetcustom---delete-specific-items)
+- [Update Functions](#update-functions)
+  - [UpdateService.update()](#updateserviceupdate---detect-and-add-new-assets)
 - [Team & Partner Management](#team--partner-management)
 - [Helper Functions](#helper-functions)
 - [Spring MVC + React Integration](#spring-mvc--react-integration)
@@ -115,6 +117,7 @@ public class PostmanConfig {
 | **Provisioning** | `ProvisioningService.provision()` | `Mono<ProvisioningResult>` | Complete provisioning |
 | **Reset** | `ResetService.reset()` | `Mono<ResetResult>` | Delete resources |
 | **Reset** | `ResetService.scanWorkspace()` | `Mono<WorkspaceContents>` | Scan before reset |
+| **Update** | `UpdateService.update()` | `Mono<UpdateResult>` | Detect and add new assets from source |
 | **Workspace** | `client.getWorkspace()` | `Mono<Workspace>` | Get workspace |
 | **Workspace** | `client.createWorkspace()` | `Mono<ApiResponse<Workspace>>` | Create workspace |
 | **Collections** | `client.getCollections()` | `Mono<List<Collection>>` | Get all collections |
@@ -316,6 +319,31 @@ public class SelectiveResetService {
             ));
     }
 }
+```
+
+---
+
+## Update Functions
+
+### `UpdateService.update()` - Detect and Add New Assets
+
+Detects and adds new assets from source to an existing partner workspace without modifying existing assets.
+
+```java
+@Autowired
+private UpdateService updateService;
+
+UpdateService.UpdateConfig config = new UpdateService.UpdateConfig(
+    "source-workspace-id",
+    "target-workspace-id",
+    progress -> System.out.println(progress.message())
+);
+
+updateService.update(config).subscribe(result -> {
+    System.out.println("New collections: " + result.newCollections().success());
+    System.out.println("New specs: " + result.newSpecs().success());
+    System.out.println("New environments: " + result.newEnvironments().success());
+});
 ```
 
 ---
@@ -1076,6 +1104,20 @@ Main SDK client with reactive methods.
 | 2 | Mock Servers | Depend on collections |
 | 3 | Environments | Independent |
 | 4 | Collections | Deleted last |
+
+### Update Workflow
+
+Detects and adds new assets from source to an existing partner workspace without modifying existing assets:
+
+| Step | Phase | Description |
+|------|-------|-------------|
+| 1 | Detection | Compare source and target workspaces (fork-check then name-match for collections, name-match for specs/environments) |
+| 2 | Fork Collections | Fork new collections from source to target |
+| 3 | Mock Servers | Create mock servers for each new collection |
+| 4 | Mock Environment | Update existing "Mock Env" in-place with new mock URL variables (or create fresh if not found) |
+| 5 | Collection Variables | PATCH new collection host variables to reference mock env variables |
+| 6 | API Specs | Copy new specification files |
+| 7 | Environments | Copy new environments (excludes "Mock Env") |
 
 ### Rate Limiting
 
