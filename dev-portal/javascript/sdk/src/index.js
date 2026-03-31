@@ -2,7 +2,7 @@
 export { HttpClient, PostmanClient } from './client/index.js';
 
 // Services
-export { WorkspaceService, ProvisioningService, ResetService } from './services/index.js';
+export { WorkspaceService, ProvisioningService, ResetService, UpdateService } from './services/index.js';
 
 // Helpers
 export {
@@ -25,6 +25,7 @@ export {
 import { PostmanClient } from './client/PostmanClient.js';
 import { ProvisioningService } from './services/ProvisioningService.js';
 import { ResetService } from './services/ResetService.js';
+import { UpdateService } from './services/UpdateService.js';
 import { WorkspaceService } from './services/WorkspaceService.js';
 import {
   getApiKey,
@@ -295,6 +296,20 @@ export async function removeMultiplePartners(workspaceId, userIds, onProgress) {
       await new Promise(r => setTimeout(r, 300));
     }
   }
-  
+
   return results;
+}
+
+/**
+ * Update workspace — detect and add new assets (convenience function)
+ * @param {Object} options
+ * @param {string} options.sourceWorkspaceId
+ * @param {string} options.targetWorkspaceId
+ * @param {function} [onProgress]
+ * @returns {Promise<Object>}
+ */
+export async function updateWorkspace(options, onProgress) {
+  const client = createClient();
+  const service = new UpdateService(client);
+  return service.update(options, onProgress);
 }
