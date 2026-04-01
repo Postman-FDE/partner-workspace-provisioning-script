@@ -278,16 +278,33 @@ export class PostmanClient {
   }
 
   /**
-   * Update a collection's variables via partial update
-   * PATCH /collections/{collectionId}
+   * Update a collection's variables via full PUT
+   * PUT /collections/{collectionId}
    */
   async patchCollectionVariables(
     collectionUid: string,
-    variables: Array<{ key: string; value: string; [k: string]: unknown }>
+    variables: Array<{ key: string; value: string; [k: string]: unknown }>,
+    collectionDetails?: CollectionDetails | null
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      await this.http.patch(`/collections/${collectionUid}`, {
-        collection: { variable: variables },
+      let details = collectionDetails;
+      if (!details) {
+        details = await this.getCollectionDetails(collectionUid);
+        if (!details) {
+          return { success: false, error: 'Failed to fetch collection details for PUT' };
+        }
+      }
+
+      const body: Record<string, unknown> = {
+        info: (details as any).info,
+        item: (details as any).item,
+        variable: variables,
+      };
+      if ((details as any).auth) body.auth = (details as any).auth;
+      if ((details as any).event) body.event = (details as any).event;
+
+      await this.http.put(`/collections/${collectionUid}`, {
+        collection: body,
       });
       return { success: true };
     } catch (error) {

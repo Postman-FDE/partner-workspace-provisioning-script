@@ -580,7 +580,7 @@ export class ProvisioningService {
           }
         }
 
-        await this.client.patchCollectionVariables(collData.targetUid, updatedVars);
+        await this.client.patchCollectionVariables(collData.targetUid, updatedVars, collData.collectionDetails);
         await this._delay(300);
         continue;
       }
@@ -598,7 +598,7 @@ export class ProvisioningService {
           )
         : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvName}}}`, type: 'string' }];
 
-      await this.client.patchCollectionVariables(collData.targetUid, updatedVars);
+      await this.client.patchCollectionVariables(collData.targetUid, updatedVars, collData.collectionDetails);
       await this._delay(300);
     }
   }
@@ -703,18 +703,11 @@ export class ProvisioningService {
 
   async _copySpecs(sourceWorkspaceId, targetWorkspaceId, store, result, onProgress, selectedIds = null) {
     const specs = await this.client.getSpecs(sourceWorkspaceId);
-    const normalize = (name) => (name || '').toLowerCase().trim();
 
-    // Only copy specs that match a copied collection name
-    const copiedCollectionNames = new Set(
-      Array.from(store.collections.values()).map(c => normalize(c.name))
-    );
-    const matchingSpecs = specs.filter(s => copiedCollectionNames.has(normalize(s.name)));
-
-    // Further filter by selectedIds if provided
+    // Copy all specs (no collection-name filter for full provision)
     const toProcess = selectedIds
-      ? matchingSpecs.filter(s => selectedIds.includes(s.id))
-      : matchingSpecs;
+      ? specs.filter(s => selectedIds.includes(s.id))
+      : specs;
 
     result.specs.total = toProcess.length;
 

@@ -304,20 +304,37 @@ export class PostmanClient {
   }
 
   /**
-   * Update a collection's variables via partial update
-   * PATCH /collections/{collectionId}
+   * Update a collection's variables via full PUT
+   * PUT /collections/{collectionId}
    * @param {string} collectionUid
    * @param {Array} variables - Full variable array to set
+   * @param {Object} [collectionDetails] - Full collection details (info, item, etc.). If not provided, fetched automatically.
    * @returns {Promise<{success: boolean, collection?: object, error?: string}>}
    */
-  async patchCollectionVariables(collectionUid, variables) {
-    const response = await this.httpClient.patch(`/collections/${collectionUid}`, {
-      collection: { variable: variables },
-    });
+  async patchCollectionVariables(collectionUid, variables, collectionDetails = null) {
+    let details = collectionDetails;
+    if (!details) {
+      details = await this.getCollectionDetails(collectionUid);
+      if (!details) {
+        return { success: false, error: 'Failed to fetch collection details for PUT' };
+      }
+    }
+
+    const body = {
+      collection: {
+        info: details.info,
+        item: details.item,
+        variable: variables,
+      },
+    };
+    if (details.auth) body.collection.auth = details.auth;
+    if (details.event) body.collection.event = details.event;
+
+    const response = await this.httpClient.put(`/collections/${collectionUid}`, body);
     if (response.success) {
       return { success: true, collection: response.data?.collection };
     }
-    return { success: false, error: response.error || 'Failed to patch collection variables' };
+    return { success: false, error: response.error || 'Failed to update collection variables' };
   }
 
   // ==================== Environments ====================

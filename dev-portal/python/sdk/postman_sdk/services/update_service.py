@@ -412,7 +412,7 @@ class UpdateService:
                             "type": "string",
                         })
 
-                await self.client.patch_collection_variables(coll_data["target_uid"], updated_vars)
+                await self.client.patch_collection_variables(coll_data["target_uid"], updated_vars, coll_details)
                 await asyncio.sleep(0.3)
                 continue
 
@@ -437,7 +437,7 @@ class UpdateService:
                     {"key": "baseUrl", "value": f"{{{{{fallback_env_name}}}}}", "type": "string"},
                 ]
 
-            await self.client.patch_collection_variables(coll_data["target_uid"], updated_vars)
+            await self.client.patch_collection_variables(coll_data["target_uid"], updated_vars, coll_details)
             await asyncio.sleep(0.3)
 
     async def _copy_new_specs(

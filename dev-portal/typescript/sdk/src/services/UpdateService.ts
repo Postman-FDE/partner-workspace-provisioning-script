@@ -436,7 +436,7 @@ export class UpdateService {
           }
         }
 
-        await this.client.patchCollectionVariables(collData.targetUid, updatedVars);
+        await this.client.patchCollectionVariables(collData.targetUid, updatedVars, collData.collectionDetails);
         await this.delay(300);
         continue;
       }
@@ -455,7 +455,7 @@ export class UpdateService {
           )
         : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvName}}}`, type: 'string' }];
 
-      await this.client.patchCollectionVariables(collData.targetUid, updatedVars);
+      await this.client.patchCollectionVariables(collData.targetUid, updatedVars, collData.collectionDetails);
       await this.delay(300);
     }
   }

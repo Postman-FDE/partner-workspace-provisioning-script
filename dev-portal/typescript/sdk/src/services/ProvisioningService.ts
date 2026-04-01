@@ -478,24 +478,18 @@ export class ProvisioningService {
           : [...existingVars, { key: 'baseUrl', value: `{{${envName}}}`, type: 'string' }];
       }
 
-      await this.client.patchCollectionVariables(collMapping.targetUid, updatedVars);
+      await this.client.patchCollectionVariables(collMapping.targetUid, updatedVars, collMapping.collectionDetails);
       await this.delay(300);
     }
   }
 
   private async copySpecs(targetWorkspaceId: string, result: ProvisioningResult): Promise<void> {
     const sourceSpecs = await this.client.getSpecs(this.config.sourceWorkspaceId);
-    const normalize = (name: string | undefined | null): string => (name || '').toLowerCase().trim();
 
-    // Only copy specs that match a copied collection name
-    const copiedCollectionNames = new Set(
-      Array.from(this.collectionMappings.values()).map(c => normalize(c.name))
-    );
-    const matchingSpecs = sourceSpecs.filter(s => copiedCollectionNames.has(normalize(s.name)));
+    // Copy all specs (no collection-name filter for full provision)
+    result.specs.total = sourceSpecs.length;
 
-    result.specs.total = matchingSpecs.length;
-
-    for (const spec of matchingSpecs) {
+    for (const spec of sourceSpecs) {
       const copyResult = await this.copySpec(spec, targetWorkspaceId);
 
       if (copyResult.success && copyResult.targetId) {

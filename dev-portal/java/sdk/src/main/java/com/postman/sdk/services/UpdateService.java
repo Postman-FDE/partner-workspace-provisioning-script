@@ -438,7 +438,7 @@ public class UpdateService {
                             }
                         }
 
-                        return client.patchCollectionVariables(targetUid, updatedVars).then();
+                        return client.patchCollectionVariables(targetUid, updatedVars, details).then();
                     }
 
                     String fallback = ctx.mockEnvVarMap.get(targetUid + ":__fallback__");
@@ -463,7 +463,7 @@ public class UpdateService {
                         updatedVars.add(Map.of("key", "baseUrl", "value", "{{" + fallback + "}}", "type", "string"));
                     }
 
-                    return client.patchCollectionVariables(targetUid, updatedVars).then();
+                    return client.patchCollectionVariables(targetUid, updatedVars, details).then();
                 })
                 .then();
     }

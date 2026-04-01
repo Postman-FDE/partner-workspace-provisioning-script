@@ -9,6 +9,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
+import java.util.HashMap;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -197,17 +198,43 @@ public class PostmanClient {
     }
 
     /**
-     * Update a collection's variables via PATCH
-     * PATCH /collections/{collectionId}
+     * Update a collection's variables via full PUT
+     * PUT /collections/{collectionId}
      */
     public Mono<ApiResponse<Void>> patchCollectionVariables(String collectionUid, List<Map<String, Object>> variables) {
-        return webClient.patch()
-            .uri("/collections/{uid}", collectionUid)
-            .bodyValue(Map.of("collection", Map.of("variable", variables)))
-            .retrieve()
-            .toBodilessEntity()
-            .map(response -> ApiResponse.<Void>success(null))
-            .onErrorResume(e -> Mono.just(ApiResponse.failure(getErrorMessage(e))));
+        return patchCollectionVariables(collectionUid, variables, null);
+    }
+
+    /**
+     * Update a collection's variables via full PUT with optional pre-fetched details
+     * PUT /collections/{collectionId}
+     */
+    @SuppressWarnings("unchecked")
+    public Mono<ApiResponse<Void>> patchCollectionVariables(String collectionUid, List<Map<String, Object>> variables, Map<String, Object> collectionDetails) {
+        Mono<Map<String, Object>> detailsMono;
+        if (collectionDetails != null) {
+            detailsMono = Mono.just(collectionDetails);
+        } else {
+            detailsMono = getCollectionDetails(collectionUid)
+                .switchIfEmpty(Mono.error(new RuntimeException("Failed to fetch collection details for PUT")));
+        }
+
+        return detailsMono.flatMap(details -> {
+            Map<String, Object> body = new HashMap<>();
+            body.put("info", details.get("info"));
+            body.put("item", details.get("item"));
+            body.put("variable", variables);
+            if (details.get("auth") != null) body.put("auth", details.get("auth"));
+            if (details.get("event") != null) body.put("event", details.get("event"));
+
+            return webClient.put()
+                .uri("/collections/{uid}", collectionUid)
+                .bodyValue(Map.of("collection", body))
+                .retrieve()
+                .toBodilessEntity()
+                .map(response -> ApiResponse.<Void>success(null))
+                .onErrorResume(e -> Mono.just(ApiResponse.failure(getErrorMessage(e))));
+        }).onErrorResume(e -> Mono.just(ApiResponse.failure(getErrorMessage(e))));
     }
 
     // =========================================================================

@@ -218,13 +218,30 @@ class PostmanClient:
             return False
 
     async def patch_collection_variables(
-        self, collection_uid: str, variables: list[dict[str, Any]]
+        self, collection_uid: str, variables: list[dict[str, Any]], collection_details: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        """Update a collection's variables via PATCH /collections/{uid}"""
+        """Update a collection's variables via PUT /collections/{uid}"""
         try:
-            response = await self._http.patch(
+            details = collection_details
+            if not details:
+                details_obj = await self.get_collection_details(collection_uid)
+                if not details_obj:
+                    return {"success": False, "error": "Failed to fetch collection details for PUT"}
+                details = details_obj.model_dump(by_alias=True) if hasattr(details_obj, 'model_dump') else details_obj
+
+            body: dict[str, Any] = {
+                "info": details.get("info"),
+                "item": details.get("item"),
+                "variable": variables,
+            }
+            if details.get("auth"):
+                body["auth"] = details["auth"]
+            if details.get("event"):
+                body["event"] = details["event"]
+
+            response = await self._http.put(
                 f"/collections/{collection_uid}",
-                json={"collection": {"variable": variables}},
+                {"collection": body},
             )
             return {"success": True, "collection": response.get("collection")}
         except Exception as e:

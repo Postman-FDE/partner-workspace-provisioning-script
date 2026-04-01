@@ -431,7 +431,7 @@ public class ProvisioningService {
                     }
                 }
 
-                return client.patchCollectionVariables(targetUid, updatedVars)
+                return client.patchCollectionVariables(targetUid, updatedVars, details)
                     .onErrorResume(e -> Mono.empty());
             })
             .then();
@@ -440,24 +440,16 @@ public class ProvisioningService {
     private Mono<Void> copySpecs(ProvisioningContext ctx) {
         ctx.emitProgress("specs", "Copying specs...");
 
-        // Auto-link: only copy specs whose name matches a copied collection
-        Set<String> copiedCollectionNames = ctx.collectionMappings.values().stream()
-                .map(m -> m.name() != null ? m.name().toLowerCase().trim() : "")
-                .collect(Collectors.toSet());
-
+        // Copy all specs (no collection-name filter for full provision)
         return client.getSpecs(ctx.config.sourceWorkspaceId())
             .flatMap(specs -> {
-                List<Spec> matchingSpecs = specs.stream()
-                        .filter(s -> copiedCollectionNames.contains(s.name() != null ? s.name().toLowerCase().trim() : ""))
-                        .toList();
+                ctx.result.specs.total = specs.size();
 
-                ctx.result.specs.total = matchingSpecs.size();
-
-                if (matchingSpecs.isEmpty()) {
+                if (specs.isEmpty()) {
                     return Mono.empty();
                 }
 
-                return Flux.fromIterable(matchingSpecs)
+                return Flux.fromIterable(specs)
                     .delayElements(Duration.ofMillis(500))
                     .flatMap(spec -> specService.copySpec(spec.id(), spec.name(), spec.type(), ctx.targetWorkspaceId)
                         .doOnNext(result -> {

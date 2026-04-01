@@ -328,7 +328,7 @@ class ProvisioningService:
                 if not fallback_done:
                     updated_vars.append({'key': 'baseUrl', 'value': f'{{{{{env_name}}}}}', 'type': 'string'})
 
-            await self.client.patch_collection_variables(coll_mapping.target_uid, updated_vars)
+            await self.client.patch_collection_variables(coll_mapping.target_uid, updated_vars, coll_mapping.collection_details)
 
     def _generate_mock_url_variables(self) -> tuple[list[EnvironmentVariable], dict[str, str]]:
         variables: list[EnvironmentVariable] = []
@@ -421,14 +421,10 @@ class ProvisioningService:
     async def _copy_specs(self, target_workspace_id: str, result: dict[str, Any]) -> None:
         source_specs = await self.client.get_specs(self.source_workspace_id)
 
-        # Auto-link: only copy specs whose name matches a copied collection
-        normalize = lambda name: (name or "").lower().strip()
-        copied_collection_names = {normalize(m.name) for m in self._collection_mappings.values()}
-        matching_specs = [s for s in source_specs if normalize(s.name) in copied_collection_names]
+        # Copy all specs (no collection-name filter for full provision)
+        result["specs"]["total"] = len(source_specs)
 
-        result["specs"]["total"] = len(matching_specs)
-
-        for spec in matching_specs:
+        for spec in source_specs:
             copy_result = await self._copy_spec(spec.id, spec.name, spec.type, target_workspace_id)
 
             if copy_result.get("success"):
