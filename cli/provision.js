@@ -639,23 +639,31 @@ const CollectionsAPI = {
   },
 
   /**
-   * Update a collection's variables via partial update
-   * PATCH /collections/{collectionId}
+   * Update a collection's variables via full PUT
+   * PUT /collections/{collectionId}
    * @param {string} collectionUid - Collection UID to update
    * @param {Array} variables - Full variable array to set on the collection
+   * @param {Object|null} collectionDetails - Full collection details (if available, avoids extra fetch)
    */
-  async patchVariables(collectionUid, variables) {
+  async putVariables(collectionUid, variables, collectionDetails = null) {
     try {
-      const response = await api.patch(`/collections/${collectionUid}`, {
-        collection: {
-          variable: variables,
-        },
+      let details = collectionDetails;
+      if (!details) {
+        const detailsRes = await api.get(`/collections/${collectionUid}`);
+        details = detailsRes.data?.collection;
+      }
+      if (!details) {
+        return { success: false, error: 'Could not fetch collection details' };
+      }
+      const body = { ...details, variable: variables };
+      const response = await api.put(`/collections/${collectionUid}`, {
+        collection: body,
       });
       return { success: true, collection: response.data.collection };
     } catch (error) {
       return {
         success: false,
-        error: logApiError('Patch collection variables', error, { collectionUid })
+        error: logApiError('Put collection variables', error, { collectionUid })
       };
     }
   },
@@ -772,8 +780,8 @@ const CollectionsHelper = {
           }
         }
 
-        const patchResult = await CollectionsAPI.patchVariables(collData.targetUid, updatedVars);
-        if (patchResult.success) {
+        const putResult = await CollectionsAPI.putVariables(collData.targetUid, updatedVars, collData.collectionDetails);
+        if (putResult.success) {
           const updatedNames = hostVars
             .map(hv => mockEnvVarMap.get(`${collData.targetUid}:${hv.varName}`))
             .filter(Boolean);
@@ -786,8 +794,8 @@ const CollectionsHelper = {
             }
           }
         } else {
-          results.failed.push({ name: collData.name, error: patchResult.error });
-          log.error(`Failed to update variables for "${collData.name}": ${patchResult.error}`);
+          results.failed.push({ name: collData.name, error: putResult.error });
+          log.error(`Failed to update variables for "${collData.name}": ${putResult.error}`);
         }
       } else {
         const fallbackEnvVarName = mockEnvVarMap.get(`${collData.targetUid}:__fallback__`);
@@ -803,15 +811,15 @@ const CollectionsHelper = {
             )
           : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvVarName}}}`, type: 'string' }];
 
-        const patchResult = await CollectionsAPI.patchVariables(collData.targetUid, updatedVars);
-        if (patchResult.success) {
+        const putResult = await CollectionsAPI.putVariables(collData.targetUid, updatedVars, collData.collectionDetails);
+        if (putResult.success) {
           const varName = matchedVar ? matchedVar.key : 'baseUrl';
           results.success.push({ name: collData.name, variables: [fallbackEnvVarName] });
           log.success(`Updated variables for: ${collData.name} (${matchedVar ? 'fallback' : 'created'})`);
           log.detail(`${varName} -> {{${fallbackEnvVarName}}}`);
         } else {
-          results.failed.push({ name: collData.name, error: patchResult.error });
-          log.error(`Failed to update variables for "${collData.name}": ${patchResult.error}`);
+          results.failed.push({ name: collData.name, error: putResult.error });
+          log.error(`Failed to update variables for "${collData.name}": ${putResult.error}`);
         }
       }
 
@@ -1407,19 +1415,12 @@ const SpecsHelper = {
       return results;
     }
 
-    // Auto-link: only copy specs whose names match a copied collection
-    const normalize = (name) => (name || '').toLowerCase().trim();
-    const copiedCollectionNames = new Set(
-      Array.from(Store.collections.values()).map(c => normalize(c.name))
-    );
-    const linkedSpecs = sourceSpecs.filter(s => copiedCollectionNames.has(normalize(s.name)));
+    log.info(`Found ${sourceSpecs.length} spec(s) to copy`);
 
-    log.info(`Found ${sourceSpecs.length} spec(s), ${linkedSpecs.length} linked to collections`);
+    for (let i = 0; i < sourceSpecs.length; i++) {
+      const spec = sourceSpecs[i];
+      log.info(`\n  [${i + 1}/${sourceSpecs.length}] Processing spec: ${spec.name} (${spec.type})`);
 
-    for (let i = 0; i < linkedSpecs.length; i++) {
-      const spec = linkedSpecs[i];
-      log.info(`\n  [${i + 1}/${linkedSpecs.length}] Processing spec: ${spec.name} (${spec.type})`);
-      
       const copyResult = await this.copySpec(
         spec.id,
         spec.name,

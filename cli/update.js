@@ -361,7 +361,8 @@ async function updateCollectionVariables(store, mockEnvVarMap) {
           updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
         }
       }
-      await apiPatch(`/collections/${collData.targetUid}`, { collection: { variable: updatedVars } });
+      const body = { ...collData.collectionDetails, variable: updatedVars };
+      await apiPut(`/collections/${collData.targetUid}`, { collection: body });
       log.success(`Updated variables for "${collData.name}"`);
       await delay(300);
       continue;
@@ -373,7 +374,8 @@ async function updateCollectionVariables(store, mockEnvVarMap) {
     const updatedVars = commonVar
       ? existingVars.map(v => v.key === commonVar.key ? { ...v, value: `{{${fallback}}}` } : v)
       : [...existingVars, { key: 'baseUrl', value: `{{${fallback}}}`, type: 'string' }];
-    await apiPatch(`/collections/${collData.targetUid}`, { collection: { variable: updatedVars } });
+    const fallbackBody = { ...collData.collectionDetails, variable: updatedVars };
+    await apiPut(`/collections/${collData.targetUid}`, { collection: fallbackBody });
     log.success(`Updated variables for "${collData.name}" (fallback)`);
     await delay(300);
   }

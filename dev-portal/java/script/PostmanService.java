@@ -967,14 +967,28 @@ public class PostmanService {
                 .onErrorResume(e -> Mono.just(false));
     }
 
-    public Mono<Map<String, Object>> patchCollectionVariables(String collectionUid, List<Map<String, Object>> variables) {
-        return webClient.patch()
-                .uri("/collections/" + collectionUid)
-                .bodyValue(Map.of("collection", Map.of("variable", variables)))
-                .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .map(response -> Map.of("success", true, "collection", response.getOrDefault("collection", Map.of())))
-                .onErrorResume(e -> Mono.just(Map.of("success", false, "error", e.getMessage())));
+    public Mono<Map<String, Object>> putCollectionVariables(String collectionUid, List<Map<String, Object>> variables,
+                                                             Map<String, Object> collectionDetails) {
+        Mono<Map<String, Object>> detailsMono;
+        if (collectionDetails != null && !collectionDetails.isEmpty()) {
+            detailsMono = Mono.just(collectionDetails);
+        } else {
+            detailsMono = getCollectionDetails(collectionUid).defaultIfEmpty(Map.of());
+        }
+        return detailsMono.flatMap(details -> {
+            if (details.isEmpty()) {
+                return Mono.just(Map.<String, Object>of("success", false, "error", "Could not fetch collection details"));
+            }
+            Map<String, Object> body = new HashMap<>(details);
+            body.put("variable", variables);
+            return webClient.put()
+                    .uri("/collections/" + collectionUid)
+                    .bodyValue(Map.of("collection", body))
+                    .retrieve()
+                    .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                    .map(response -> Map.of("success", true, "collection", response.getOrDefault("collection", Map.of())))
+                    .onErrorResume(e -> Mono.just(Map.of("success", false, "error", e.getMessage())));
+        });
     }
 
     // ============================================================================
@@ -1576,7 +1590,7 @@ public class PostmanService {
                                             updatedVars.add(Map.of("key", varName, "value", "{{" + envName + "}}", "type", "string"));
                                         }
                                     }
-                                    return patchCollectionVariables((String) coll.get("uid"), updatedVars)
+                                    return putCollectionVariables((String) coll.get("uid"), updatedVars, collDetails)
                                             .then(delay(300));
                                 }
                                 String fallbackEnv = mockEnvVarMap.get(coll.get("uid") + ":__fallback__");
@@ -1595,7 +1609,7 @@ public class PostmanService {
                                 if (!matched[0]) {
                                     updatedVars.add(Map.of("key", "baseUrl", "value", "{{" + fallbackEnv + "}}", "type", "string"));
                                 }
-                                return patchCollectionVariables((String) coll.get("uid"), updatedVars)
+                                return putCollectionVariables((String) coll.get("uid"), updatedVars, collDetails)
                                         .then(delay(300));
                             })
                             .then();
@@ -2039,7 +2053,7 @@ public class PostmanService {
                                                             updatedVars.add(Map.of("key", varName, "value", "{{" + envName + "}}", "type", "string"));
                                                         }
                                                     }
-                                                    return patchCollectionVariables(collUid, updatedVars).then(delay(300));
+                                                    return putCollectionVariables(collUid, updatedVars, collDetails).then(delay(300));
                                                 }
 
                                                 String fallbackEnv = mockEnvVarMap.get(collUid + ":__fallback__");
@@ -2058,7 +2072,7 @@ public class PostmanService {
                                                 if (!matched[0]) {
                                                     updatedVars.add(Map.of("key", "baseUrl", "value", "{{" + fallbackEnv + "}}", "type", "string"));
                                                 }
-                                                return patchCollectionVariables(collUid, updatedVars).then(delay(300));
+                                                return putCollectionVariables(collUid, updatedVars, collDetails).then(delay(300));
                                             })
                                             .then();
                                 }))
