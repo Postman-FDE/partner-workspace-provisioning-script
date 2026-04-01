@@ -826,16 +826,41 @@ export const deleteCollection = async (collectionId) => {
 };
 
 /**
- * Patch collection variables (partial update).
+ * Update collection variables via PUT with full collection body.
  * @param {string} collectionUid
  * @param {Array} variables
+ * @param {object|null} collectionDetails - If provided, skips an extra fetch
  * @returns {Promise<{success: boolean, collection?: object, error?: string}>}
  */
-export const patchCollectionVariables = async (collectionUid, variables) => {
+export const patchCollectionVariables = async (collectionUid, variables, collectionDetails = null) => {
   try {
-    const response = await axios.patch(
+    if (collectionDetails) {
+      const updatedCollection = {
+        info: collectionDetails.info,
+        item: collectionDetails.item,
+        variable: variables,
+      };
+      if (collectionDetails.auth) updatedCollection.auth = collectionDetails.auth;
+      if (collectionDetails.event) updatedCollection.event = collectionDetails.event;
+      const response = await axios.put(
+        `${POSTMAN_API_BASE}/collections/${collectionUid}`,
+        { collection: updatedCollection },
+        { headers: headers() }
+      );
+      return { success: true, collection: response.data.collection };
+    }
+    const detailsResponse = await getCollectionDetails(collectionUid);
+    if (!detailsResponse) return { success: false, error: "Could not fetch collection details for update" };
+    const updatedCollection = {
+      info: detailsResponse.info,
+      item: detailsResponse.item,
+      variable: variables,
+    };
+    if (detailsResponse.auth) updatedCollection.auth = detailsResponse.auth;
+    if (detailsResponse.event) updatedCollection.event = detailsResponse.event;
+    const response = await axios.put(
       `${POSTMAN_API_BASE}/collections/${collectionUid}`,
-      { collection: { variable: variables } },
+      { collection: updatedCollection },
       { headers: headers() }
     );
     return { success: true, collection: response.data.collection };
@@ -1296,7 +1321,7 @@ export const provisionWorkspace = async (options, onProgress) => {
               updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
             }
           }
-          await patchCollectionVariables(coll.uid, updatedVars);
+          await patchCollectionVariables(coll.uid, updatedVars, coll.collectionDetails);
         } else {
           const fallbackEnvVarName = mockEnvVarMap.get(`${coll.uid}:__fallback__`);
           if (!fallbackEnvVarName) continue;
@@ -1306,22 +1331,19 @@ export const provisionWorkspace = async (options, onProgress) => {
                 v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
               )
             : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvVarName}}}`, type: 'string' }];
-          await patchCollectionVariables(coll.uid, updatedVars);
+          await patchCollectionVariables(coll.uid, updatedVars, coll.collectionDetails);
         }
         await delay(300);
       }
     }
 
-    // Step 6: Copy Specs (auto-linked to collections by name)
+    // Step 6: Copy Specs
     onProgress?.({ phase: "specs", message: "Copying specs...", progress: 80 });
     const sourceSpecs = await getAllSpecs(sourceWorkspaceId);
-    const normalizeSpec = (name) => (name || '').toLowerCase().trim();
-    const copiedCollNames = new Set(results.collections.successData.map(c => normalizeSpec(c.name)));
-    const linkedSpecs = sourceSpecs.filter(s => copiedCollNames.has(normalizeSpec(s.name)));
-    results.specs.total = linkedSpecs.length;
-    for (let i = 0; i < linkedSpecs.length; i++) {
-      const spec = linkedSpecs[i];
-      onProgress?.({ phase: "specs", message: `Copying: ${spec.name}`, current: i + 1, total: linkedSpecs.length, progress: 80 + (i / linkedSpecs.length) * 15 });
+    results.specs.total = sourceSpecs.length;
+    for (let i = 0; i < sourceSpecs.length; i++) {
+      const spec = sourceSpecs[i];
+      onProgress?.({ phase: "specs", message: `Copying: ${spec.name}`, current: i + 1, total: sourceSpecs.length, progress: 80 + (i / sourceSpecs.length) * 15 });
       const copyResult = await copySpec(spec.id, spec.name, spec.type, workspaceId);
       if (copyResult.success) {
         results.specs.success++;
@@ -1597,7 +1619,7 @@ export const updateWorkspaceAssets = async ({ sourceWorkspaceId, targetWorkspace
               updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
             }
           }
-          await patchCollectionVariables(coll.uid, updatedVars);
+          await patchCollectionVariables(coll.uid, updatedVars, coll.collectionDetails);
         } else {
           const fallbackEnvVarName = mockEnvVarMap.get(`${coll.uid}:__fallback__`);
           if (!fallbackEnvVarName) continue;
@@ -1605,7 +1627,7 @@ export const updateWorkspaceAssets = async ({ sourceWorkspaceId, targetWorkspace
           const updatedVars = matchedVar
             ? existingVars.map(v => v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v)
             : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvVarName}}}`, type: 'string' }];
-          await patchCollectionVariables(coll.uid, updatedVars);
+          await patchCollectionVariables(coll.uid, updatedVars, coll.collectionDetails);
         }
         await delay(300);
       }
@@ -1903,10 +1925,12 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
       console.warn(`Unexpected error copying workspace description: ${descError.message} — continuing provisioning`);
     }
 
+    // Fetch source collections early so spec linking can reference them
+    let sourceCollections = await getAllCollections(sourceWorkspaceId);
+    if (selectedCollectionUids?.length > 0) sourceCollections = sourceCollections.filter((c) => selectedCollectionUids.includes(c.uid));
+
     if (copyCollections) {
       onProgress?.({ phase: "collections", message: "Copying collections...", progress: 20 });
-      let sourceCollections = await getAllCollections(sourceWorkspaceId);
-      if (selectedCollectionUids?.length > 0) sourceCollections = sourceCollections.filter((c) => selectedCollectionUids.includes(c.uid));
       results.collections.total = sourceCollections.length;
 
       for (let i = 0; i < sourceCollections.length; i++) {
@@ -2012,7 +2036,7 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
                 updatedVars.push({ key: hv.varName, value: `{{${envName}}}`, type: 'string' });
               }
             }
-            await patchCollectionVariables(coll.uid, updatedVars);
+            await patchCollectionVariables(coll.uid, updatedVars, coll.collectionDetails);
           } else {
             const fallbackEnvVarName = customMockEnvVarMap.get(`${coll.uid}:__fallback__`);
             if (!fallbackEnvVarName) continue;
@@ -2022,7 +2046,7 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
                   v.key === matchedVar.key ? { ...v, value: `{{${fallbackEnvVarName}}}` } : v
                 )
               : [...existingVars, { key: 'baseUrl', value: `{{${fallbackEnvVarName}}}`, type: 'string' }];
-            await patchCollectionVariables(coll.uid, updatedVars);
+            await patchCollectionVariables(coll.uid, updatedVars, coll.collectionDetails);
           }
           await delay(300);
         }
@@ -2033,10 +2057,10 @@ export const provisionCustomWorkspace = async (options, onProgress) => {
       onProgress?.({ phase: "specs", message: "Copying specs...", progress: 80 });
       let srcSpecs = await getAllSpecs(sourceWorkspaceId);
       if (selectedSpecIds?.length > 0) srcSpecs = srcSpecs.filter((s) => selectedSpecIds.includes(s.id));
-      // Auto-link: only copy specs whose names match a copied collection
-      const normSpec = (name) => (name || '').toLowerCase().trim();
-      const copiedCollNamesCustom = new Set(results.collections.successData.map(c => normSpec(c.name)));
-      srcSpecs = srcSpecs.filter(s => copiedCollNamesCustom.has(normSpec(s.name)));
+      // Auto-link: only copy specs whose names match a selected source collection
+      const normSpecCustom = (name) => (name || '').toLowerCase().trim();
+      const selectedCollNames = new Set(sourceCollections.map(c => normSpecCustom(c.name)));
+      srcSpecs = srcSpecs.filter(s => selectedCollNames.has(normSpecCustom(s.name)));
       results.specs.total = srcSpecs.length;
       for (let i = 0; i < srcSpecs.length; i++) {
         const spec = srcSpecs[i];
