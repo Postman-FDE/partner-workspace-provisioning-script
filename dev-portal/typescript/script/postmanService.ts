@@ -1216,12 +1216,37 @@ export const getCollectionDetails = async (
  */
 export const patchCollectionVariables = async (
   collectionUid: string,
-  variables: Array<{ key: string; value: string; [key: string]: any }>
+  variables: Array<{ key: string; value: string; [key: string]: any }>,
+  collectionDetails: any = null
 ): Promise<{ success: boolean; collection?: any; error?: string }> => {
   try {
-    const response = await axios.patch(
+    if (collectionDetails) {
+      const updatedCollection: any = {
+        info: collectionDetails.info,
+        item: collectionDetails.item,
+        variable: variables,
+      };
+      if (collectionDetails.auth) updatedCollection.auth = collectionDetails.auth;
+      if (collectionDetails.event) updatedCollection.event = collectionDetails.event;
+      const response = await axios.put(
+        `${POSTMAN_API_BASE}/collections/${collectionUid}`,
+        { collection: updatedCollection },
+        { headers: headers() }
+      );
+      return { success: true, collection: response.data.collection };
+    }
+    const detailsResponse = await getCollectionDetails(collectionUid);
+    if (!detailsResponse) return { success: false, error: "Could not fetch collection details for update" };
+    const updatedCollection: any = {
+      info: detailsResponse.info,
+      item: detailsResponse.item,
+      variable: variables,
+    };
+    if (detailsResponse.auth) updatedCollection.auth = detailsResponse.auth;
+    if (detailsResponse.event) updatedCollection.event = detailsResponse.event;
+    const response = await axios.put(
       `${POSTMAN_API_BASE}/collections/${collectionUid}`,
-      { collection: { variable: variables } },
+      { collection: updatedCollection },
       { headers: headers() }
     );
     return { success: true, collection: response.data.collection };
@@ -1988,7 +2013,7 @@ export const provisionWorkspace = async (
               )
             : [...existingVars, { key: 'baseUrl', value: `{{${mockEnvVarName}}}`, type: 'string' }];
         }
-        const patchResult = await patchCollectionVariables(collUid, updatedVars);
+        const patchResult = await patchCollectionVariables(collUid, updatedVars, hvData.collectionDetails);
         if (!patchResult.success) {
           results.errors.push(`Failed to update variables for collection ${collUid}: ${patchResult.error}`);
         }
@@ -2367,14 +2392,16 @@ export const provisionCustomWorkspace = async (
 
     const customCollectionHostVars = new Map<string, { hostVariables: HostVariableInfo[]; collectionDetails: any }>();
 
+    // Fetch source collections early so spec linking can reference them
+    let sourceCollections = await getAllCollections(sourceWorkspaceId);
+    if ((selectedCollectionUids?.length ?? 0) > 0) {
+      sourceCollections = sourceCollections.filter((c) =>
+        selectedCollectionUids!.includes(c.uid)
+      );
+    }
+
     if (copyCollections) {
       onProgress?.({ phase: "collections", message: "Copying collections...", progress: 20 });
-      let sourceCollections = await getAllCollections(sourceWorkspaceId);
-      if ((selectedCollectionUids?.length ?? 0) > 0) {
-        sourceCollections = sourceCollections.filter((c) =>
-          selectedCollectionUids!.includes(c.uid)
-        );
-      }
       results.collections.total = sourceCollections.length;
 
       for (let i = 0; i < sourceCollections.length; i++) {
@@ -2574,7 +2601,7 @@ export const provisionCustomWorkspace = async (
                   )
                 : [...existingVars, { key: 'baseUrl', value: `{{${mockEnvVarName}}}`, type: 'string' }];
             }
-            const patchResult = await patchCollectionVariables(collUid, updatedVars);
+            const patchResult = await patchCollectionVariables(collUid, updatedVars, hvData.collectionDetails);
             if (!patchResult.success) {
               results.errors.push(`Failed to update variables for collection ${collUid}: ${patchResult.error}`);
             }
@@ -2586,20 +2613,23 @@ export const provisionCustomWorkspace = async (
 
     if (copySpecs) {
       onProgress?.({ phase: "specs", message: "Copying specs...", progress: 80 });
-      const srcSpecs = await getAllSpecs(sourceWorkspaceId);
-      const filteredSpecs =
-        (selectedSpecIds?.length ?? 0) > 0
-          ? srcSpecs.filter((s) => selectedSpecIds!.includes(s.id))
-          : srcSpecs;
-      results.specs.total = filteredSpecs.length;
-      for (let i = 0; i < filteredSpecs.length; i++) {
-        const spec = filteredSpecs[i];
+      let srcSpecs = await getAllSpecs(sourceWorkspaceId);
+      if ((selectedSpecIds?.length ?? 0) > 0) {
+        srcSpecs = srcSpecs.filter((s) => selectedSpecIds!.includes(s.id));
+      }
+      // Auto-link: only copy specs whose names match a selected source collection
+      const normSpecCustom = (name: string) => (name || '').toLowerCase().trim();
+      const selectedCollNames = new Set(sourceCollections.map(c => normSpecCustom(c.name)));
+      srcSpecs = srcSpecs.filter(s => selectedCollNames.has(normSpecCustom(s.name)));
+      results.specs.total = srcSpecs.length;
+      for (let i = 0; i < srcSpecs.length; i++) {
+        const spec = srcSpecs[i];
         onProgress?.({
           phase: "specs",
           message: `Copying: ${spec.name}`,
           current: i + 1,
-          total: filteredSpecs.length,
-          progress: 80 + (i / filteredSpecs.length) * 15,
+          total: srcSpecs.length,
+          progress: 80 + (i / srcSpecs.length) * 15,
         });
         const cr = await copySpec(spec.id, spec.name, spec.type, workspaceId!);
         if (cr.success) {

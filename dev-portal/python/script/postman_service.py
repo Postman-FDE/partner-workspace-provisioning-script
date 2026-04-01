@@ -1147,14 +1147,44 @@ async def delete_collection(collection_id: str) -> bool:
 
 
 async def patch_collection_variables(
-    collection_uid: str, variables: list[dict]
+    collection_uid: str, variables: list[dict], collection_details: Optional[dict] = None
 ) -> dict:
-    """Update a collection's variables via PATCH."""
+    """Update a collection's variables via PUT (full body replacement)."""
     try:
+        if collection_details:
+            updated_collection: dict[str, Any] = {
+                "info": collection_details["info"],
+                "item": collection_details["item"],
+                "variable": variables,
+            }
+            if collection_details.get("auth"):
+                updated_collection["auth"] = collection_details["auth"]
+            if collection_details.get("event"):
+                updated_collection["event"] = collection_details["event"]
+            response = await _request(
+                "PUT",
+                f"{POSTMAN_API_BASE}/collections/{collection_uid}",
+                json={"collection": updated_collection},
+            )
+            response.raise_for_status()
+            data = response.json()
+            return {"success": True, "collection": data.get("collection")}
+        details_response = await get_collection_details(collection_uid)
+        if not details_response:
+            return {"success": False, "error": "Could not fetch collection details for update"}
+        updated_collection = {
+            "info": details_response["info"],
+            "item": details_response["item"],
+            "variable": variables,
+        }
+        if details_response.get("auth"):
+            updated_collection["auth"] = details_response["auth"]
+        if details_response.get("event"):
+            updated_collection["event"] = details_response["event"]
         response = await _request(
-            "PATCH",
+            "PUT",
             f"{POSTMAN_API_BASE}/collections/{collection_uid}",
-            json={"collection": {"variable": variables}},
+            json={"collection": updated_collection},
         )
         response.raise_for_status()
         data = response.json()
@@ -1780,7 +1810,7 @@ async def provision_workspace(
                         env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
                         if env_name and hv["var_name"] not in matched_keys:
                             updated_vars.append({"key": hv["var_name"], "value": f"{{{{{env_name}}}}}", "type": "string"})
-                    await patch_collection_variables(coll["uid"], updated_vars)
+                    await patch_collection_variables(coll["uid"], updated_vars, coll.get("collection_details"))
                 else:
                     env_name = mock_env_var_map.get(f"{coll['uid']}:__fallback__")
                     if not env_name:
@@ -1794,25 +1824,21 @@ async def provision_workspace(
                             updated_vars.append(v)
                     if not fallback_done:
                         updated_vars.append({"key": "baseUrl", "value": f"{{{{{env_name}}}}}", "type": "string"})
-                    await patch_collection_variables(coll["uid"], updated_vars)
+                    await patch_collection_variables(coll["uid"], updated_vars, coll.get("collection_details"))
 
-        # Step 6: Copy Specs (auto-linked to collections by name)
+        # Step 6: Copy Specs
         if on_progress:
             on_progress({"phase": "specs", "message": "Copying specs...", "progress": 80})
         source_specs = await get_all_specs(source_workspace_id)
-        # Auto-link: only copy specs whose names match a copied collection
-        norm = lambda name: (name or "").lower().strip()
-        copied_coll_names = {norm(c["name"]) for c in results["collections"]["success_data"]}
-        linked_specs = [s for s in source_specs if norm(s.get("name")) in copied_coll_names]
-        results["specs"]["total"] = len(linked_specs)
-        for i, spec in enumerate(linked_specs):
+        results["specs"]["total"] = len(source_specs)
+        for i, spec in enumerate(source_specs):
             if on_progress:
                 on_progress({
                     "phase": "specs",
                     "message": f"Copying: {spec.get('name')}",
                     "current": i + 1,
-                    "total": len(linked_specs),
-                    "progress": 80 + int((i / len(linked_specs)) * 15) if linked_specs else 80,
+                    "total": len(source_specs),
+                    "progress": 80 + int((i / len(source_specs)) * 15) if source_specs else 80,
                 })
             copy_result = await copy_spec(
                 spec["id"], spec["name"], spec["type"], workspace_id
@@ -2160,7 +2186,7 @@ async def update_workspace_assets(
                         env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
                         if env_name and hv["var_name"] not in matched_keys:
                             updated_vars.append({"key": hv["var_name"], "value": f"{{{{{env_name}}}}}", "type": "string"})
-                    await patch_collection_variables(coll["uid"], updated_vars)
+                    await patch_collection_variables(coll["uid"], updated_vars, coll.get("collection_details"))
                 else:
                     env_name = mock_env_var_map.get(f"{coll['uid']}:__fallback__")
                     if not env_name:
@@ -2174,7 +2200,7 @@ async def update_workspace_assets(
                             updated_vars.append(v)
                     if not fallback_done:
                         updated_vars.append({"key": "baseUrl", "value": f"{{{{{env_name}}}}}", "type": "string"})
-                    await patch_collection_variables(coll["uid"], updated_vars)
+                    await patch_collection_variables(coll["uid"], updated_vars, coll.get("collection_details"))
                 await asyncio.sleep(0.3)
 
         # Step 6: Copy new specs (auto-linked to collections)
@@ -2550,12 +2576,14 @@ async def provision_custom_workspace(
         except Exception as desc_err:
             print(f"WARNING: Unexpected error copying workspace description: {desc_err} — continuing provisioning")
 
+        # Fetch source collections early so spec linking can reference them
+        source_collections = await get_all_collections(source_workspace_id)
+        if selected_collection_uids:
+            source_collections = [c for c in source_collections if c.get("uid") in selected_collection_uids]
+
         if copy_collections:
             if on_progress:
                 on_progress({"phase": "collections", "message": "Copying collections...", "progress": 20})
-            source_collections = await get_all_collections(source_workspace_id)
-            if selected_collection_uids:
-                source_collections = [c for c in source_collections if c.get("uid") in selected_collection_uids]
             results["collections"]["total"] = len(source_collections)
             env_map: dict[str, dict[str, Any]] = {}
 
@@ -2733,7 +2761,7 @@ async def provision_custom_workspace(
                             env_name = mock_env_var_map.get(f"{coll['uid']}:{hv['var_name']}")
                             if env_name and hv["var_name"] not in matched_keys:
                                 updated_vars.append({"key": hv["var_name"], "value": f"{{{{{env_name}}}}}", "type": "string"})
-                        await patch_collection_variables(coll["uid"], updated_vars)
+                        await patch_collection_variables(coll["uid"], updated_vars, coll.get("collection_details"))
                     else:
                         env_name = mock_env_var_map.get(f"{coll['uid']}:__fallback__")
                         if not env_name:
@@ -2747,7 +2775,7 @@ async def provision_custom_workspace(
                                 updated_vars.append(v)
                         if not fallback_done:
                             updated_vars.append({"key": "baseUrl", "value": f"{{{{{env_name}}}}}", "type": "string"})
-                        await patch_collection_variables(coll["uid"], updated_vars)
+                        await patch_collection_variables(coll["uid"], updated_vars, coll.get("collection_details"))
 
         if copy_specs:
             if on_progress:
@@ -2755,10 +2783,10 @@ async def provision_custom_workspace(
             src_specs = await get_all_specs(source_workspace_id)
             if selected_spec_ids:
                 src_specs = [s for s in src_specs if s.get("id") in selected_spec_ids]
-            # Auto-link: only copy specs whose names match a copied collection
+            # Auto-link: only copy specs whose names match a selected source collection
             _norm = lambda name: (name or "").lower().strip()
-            _copied_coll_names = {_norm(c["name"]) for c in results["collections"]["success_data"]}
-            src_specs = [s for s in src_specs if _norm(s.get("name")) in _copied_coll_names]
+            _selected_coll_names = {_norm(c.get("name")) for c in source_collections}
+            src_specs = [s for s in src_specs if _norm(s.get("name")) in _selected_coll_names]
             results["specs"]["total"] = len(src_specs)
             for i, spec in enumerate(src_specs):
                 if on_progress:
